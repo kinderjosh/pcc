@@ -1,0 +1,5 @@
+obj
+tcc
+target.c
+*.asm
+*.o
