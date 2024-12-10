@@ -3,7 +3,7 @@ CFLAGS = -Wall -Wextra -g -std=c99 -fPIC -fpie -D_GNU_SOURCE
 
 SRC_DIR = src
 OBJ_DIR = obj
-TARGET = tcc
+TARGET = pcc
 
 SRCS = $(wildcard $(SRC_DIR)/*.c)
 OBJS = $(patsubst $(SRC_DIR)/%.c, $(OBJ_DIR)/%.o, $(SRCS))
