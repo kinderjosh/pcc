@@ -20,6 +20,6 @@ $(OBJ_DIR):
 	mkdir $(OBJ_DIR)
 
 clean:
-	rm -rf $(OBJ_DIR) $(TARGET)
+	rm -rf $(OBJ_DIR) $(TARGET) *.asm *.o
 
 .PHONY: all clean
