@@ -1,5 +1,5 @@
 obj
-tcc
+pcc
 target.c
 *.asm
 *.o
