@@ -13,7 +13,8 @@ typedef enum {
     TOK_LBRACE,
     TOK_RBRACE,
     TOK_SEMI,
-    TOK_COMMA
+    TOK_COMMA,
+    TOK_EQUAL
 } TokType;
 
 typedef struct {

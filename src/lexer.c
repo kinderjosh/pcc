@@ -116,6 +116,48 @@ Tok *lex_next(Lex *lex) {
 
         value[len] = '\0';
         return tok_init(is_float ? TOK_FLOAT : TOK_INT, value, lex->ln, lex->col - len);
+    } else if (lex->ch == '\'') {
+        size_t col = lex->col;
+        lex_step(lex);
+        char *value = calloc(32, sizeof(char));
+
+        if (lex->ch == '\\') {
+            lex_step(lex);
+
+            switch (lex->ch) {
+                case 'n':
+                    strcpy(value, "10");
+                    break;
+                case 't':
+                    strcpy(value, "9");
+                    break;
+                case 'r':
+                    strcpy(value, "13");
+                    break;
+                case '0':
+                    strcpy(value, "0");
+                    break;
+                case '\'':
+                case '"':
+                case '\\':
+                    sprintf(value, "%d", (int)lex->ch);
+                    break;
+                default:
+                    fprintf(stderr, "%s:%zu:%zu: Error: Unsupported escape sequence '\\%c'.\n", lex->file, lex->ln, col, lex->ch);
+                    exit(EXIT_FAILURE);
+            }
+        } else
+            sprintf(value, "%d", (int)lex->ch);
+
+        lex_step(lex);
+
+        if (lex->ch != '\'') {
+            fprintf(stderr, "%s:%zu:%zu: Error: Unclosed character constant.\n", lex->file, lex->ln, col);
+            exit(EXIT_FAILURE);
+        }
+
+        lex_step(lex);
+        return tok_init(TOK_INT, value, lex->ln, lex->col);
     }
 
     switch (lex->ch) {
@@ -125,6 +167,7 @@ Tok *lex_next(Lex *lex) {
         case '}': return lex_step_with(lex, TOK_RBRACE, "}");
         case ';': return lex_step_with(lex, TOK_SEMI, ";");
         case ',': return lex_step_with(lex, TOK_COMMA, ",");
+        case '=': return lex_step_with(lex, TOK_EQUAL, "=");
         case '\0': return tok_init(TOK_EOF, strdup("<eof>"), lex->ln, lex->col);
         default: break;
     }

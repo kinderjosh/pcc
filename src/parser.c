@@ -108,6 +108,40 @@ AST **prs_body(Prs *prs, size_t *cnt, bool allow_no_braces) {
     return body;
 }
 
+AST *prs_value(Prs *prs, char *type) {
+    AST *value = prs_stmt(prs);
+
+    if (type == NULL)
+        return value;
+
+    switch (value->type) {
+        case AST_INT:
+        case AST_FLOAT:
+            if (value->type == AST_FLOAT && strcmp(type, "float") != 0)
+                value->type = AST_INT;
+
+            if (strcmp(type, "char") == 0 && (value->data.digit > CHAR_MAX || value->data.digit < CHAR_MIN))
+                value->data.digit = (unsigned char)((signed char)value->data.digit);
+            else if (strcmp(type, "char") != 0 && (value->data.digit > INT_MAX || value->data.digit < INT_MIN))
+                value->data.digit = (unsigned int)((signed int)value->data.digit);
+            break;
+        case AST_VAR: break;
+        case AST_CALL: {
+            AST *sym = sym_find(AST_FUNC, "<global>", value->call.name);
+            if (strcmp(sym->func.type, "void") == 0) {
+                fprintf(stderr, "%s:%zu:%zu: Error: Function '%s' doesn't return a value.\n", prs->file, value->ln, value->col, value->call.name);
+                exit(EXIT_FAILURE);
+            }
+            break;
+        }
+        default:
+            fprintf(stderr, "%s:%zu:%zu: Error: Invalid value '%s'.\n", prs->file, value->ln, value->col, ast_types[value->type]);
+            exit(EXIT_FAILURE);
+    }
+
+    return value;
+}
+
 AST *prs_id_func(Prs *prs, char *name, char *type, size_t ln, size_t col) {
     AST *sym = sym_find(AST_FUNC, "<global>", name);
     if (sym != NULL) {
@@ -180,7 +214,7 @@ AST *prs_id_func(Prs *prs, char *name, char *type, size_t ln, size_t col) {
 
 AST *prs_id_assign(Prs *prs, char *name, char *type, size_t ln, size_t col) {
     AST *sym = sym_find(AST_ASSIGN, prs->cur_scope, name);
-    if (sym != NULL) {
+    if (type != NULL && sym != NULL) {
         fprintf(stderr, "%s:%zu:%zu: Error: Redefinition of variable '%s'; first defined at %zu:%zu.\n", prs->file, ln, col, name, sym->ln, sym->col);
         exit(EXIT_FAILURE);
     }
@@ -188,8 +222,37 @@ AST *prs_id_assign(Prs *prs, char *name, char *type, size_t ln, size_t col) {
     AST *ast = ast_init(AST_ASSIGN, prs->cur_scope, prs->cur_func, ln, col);
     ast->assign.name = name;
     ast->assign.type = type;
-    ast->assign.value = NULL;
     ast->assign.rbp = NULL;
+
+    if (prs->tok->type == TOK_EQUAL) {
+        prs_eat(prs, TOK_EQUAL);
+        ast->assign.value = prs_value(prs, type == NULL ? sym->assign.type : type);
+    } else
+        ast->assign.value = NULL;
+
+    if (type != NULL)
+        sym_append(ast);
+
+    return ast;
+}
+
+AST *prs_id_ret(Prs *prs, size_t ln, size_t col) {
+    AST *sym = sym_find(AST_FUNC, "<global>", prs->cur_func);
+    if (sym == NULL) {
+        fprintf(stderr, "%s:%zu:%zu: Error: Invalid statement 'Return' outside of a function.\n", prs->file, ln, col);
+        exit(EXIT_FAILURE);
+    }
+
+    if (strcmp(sym->func.type, "void") == 0 && prs->tok->type != TOK_SEMI) {
+        fprintf(stderr, "%s:%zu:%zu: Error: Unexpected return value in function '%s' of type 'void'.\n", prs->file, prs->tok->ln, prs->tok->col, prs->cur_func);
+        exit(EXIT_FAILURE);
+    } else if (strcmp(sym->func.type, "void") != 0 && prs->tok->type == TOK_SEMI) {
+        fprintf(stderr, "%s:%zu:%zu: Error: Missing return value in function '%s' of type '%s'.\n", prs->file, prs->tok->ln, prs->tok->col, prs->cur_func, sym->func.type);
+        exit(EXIT_FAILURE);
+    }
+
+    AST *ast = ast_init(AST_RET, prs->cur_scope, prs->cur_func, ln, col);
+    ast->ret.value = prs->tok->type == TOK_SEMI ? NULL : prs_value(prs, sym->func.type);
     return ast;
 }
 
@@ -208,6 +271,15 @@ AST *prs_id(Prs *prs) {
             return prs_id_func(prs, name, id, ln, col);
 
         return prs_id_assign(prs, name, id, ln, col);
+    } else if (strcmp(id, "return") == 0) {
+        free(id);
+        return prs_id_ret(prs, ln, col);
+    } else if (prs->tok->type == TOK_EQUAL)
+        return prs_id_assign(prs, id, NULL, ln, col);
+    else if (sym_find(AST_ASSIGN, prs->cur_scope, id) != NULL) {
+        AST *ast = ast_init(AST_VAR, prs->cur_scope, prs->cur_func, ln, col);
+        ast->var.name = id;
+        return ast;
     }
 
     fprintf(stderr, "%s:%zu:%zu: Error: Unknown identifier '%s'.\n", prs->file, ln, col, id);
