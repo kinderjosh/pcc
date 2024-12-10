@@ -8,8 +8,8 @@ TCC is my own implementation of the C language. It only compiles for x86-64 Linu
 ## Development Progress
 
 - [x] - Main function
-- [ ] - Variables
-- [ ] - Returns
+- [x] - Variables
+- [x] - Returns
 - [ ] - Calls
 - [ ] - Math
 - [ ] - Arrays
