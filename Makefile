@@ -1,5 +1,5 @@
 CC = gcc
-CFLAGS = -Wall -Wextra -g -std=c99 -fPIC -fpie -D_GNU_SOURCE
+CFLAGS = -Wall -Wextra -Wno-discarded-qualifiers -g -O2 -std=c99 -fPIC -fpie -D_GNU_SOURCE
 
 SRC_DIR = src
 OBJ_DIR = obj

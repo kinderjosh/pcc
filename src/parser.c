@@ -256,6 +256,47 @@ AST *prs_id_ret(Prs *prs, size_t ln, size_t col) {
     return ast;
 }
 
+AST *prs_id_call(Prs *prs, char *name, size_t ln, size_t col) {
+    AST *sym = sym_find(AST_FUNC, "<global>", name);
+    if (sym == NULL) {
+        fprintf(stderr, "%s:%zu:%zu: Error: Undefined function '%s'.\n", prs->file, ln, col, name);
+        exit(EXIT_FAILURE);
+    }
+
+    AST **args = calloc(1, sizeof(AST *));
+    size_t args_cnt = 0;
+    AST *param;
+    prs_eat(prs, TOK_LPAREN);
+
+    while (prs->tok->type != TOK_RPAREN && prs->tok->type != TOK_EOF) {
+        if (args_cnt == 6) {
+            fprintf(stderr, "%s:%zu:%zu: Error: Maximum argument count of 6 exceeded.\n", prs->file, prs->tok->ln, prs->tok->col);
+            exit(EXIT_FAILURE);
+        } else if (args_cnt == sym->func.params_cnt) {
+            fprintf(stderr, "%s:%zu:%zu: Error: Excessive arguments in call to function '%s'; expected %zu but found %zu.\n", prs->file, ln, col, name, sym->func.params_cnt, args_cnt);
+            exit(EXIT_FAILURE);
+        } else if (args_cnt > 0)
+            prs_eat(prs, TOK_COMMA);
+
+        param = sym->func.params[args_cnt];
+        args = realloc(args, (args_cnt + 1) * sizeof(AST *));
+        args[args_cnt++] = prs_value(prs, param->assign.type);
+    }
+
+    prs_eat(prs, TOK_RPAREN);
+
+    if (args_cnt < sym->func.params_cnt) {
+        fprintf(stderr, "%s:%zu:%zu: Error: Missing arguments in call to function '%s'; expected %zu but found %zu.\n", prs->file, ln, col, name, sym->func.params_cnt, args_cnt);
+        exit(EXIT_FAILURE);
+    }
+
+    AST *ast = ast_init(AST_CALL, prs->cur_scope, prs->cur_func, ln, col);
+    ast->call.name = name;
+    ast->call.args = args;
+    ast->call.args_cnt = args_cnt;
+    return ast;
+}
+
 AST *prs_id(Prs *prs) {
     size_t ln = prs->tok->ln;
     size_t col = prs->tok->col;
@@ -276,6 +317,8 @@ AST *prs_id(Prs *prs) {
         return prs_id_ret(prs, ln, col);
     } else if (prs->tok->type == TOK_EQUAL)
         return prs_id_assign(prs, id, NULL, ln, col);
+    else if (prs->tok->type == TOK_LPAREN)
+        return prs_id_call(prs, id, ln, col);
     else if (sym_find(AST_ASSIGN, prs->cur_scope, id) != NULL) {
         AST *ast = ast_init(AST_VAR, prs->cur_scope, prs->cur_func, ln, col);
         ast->var.name = id;

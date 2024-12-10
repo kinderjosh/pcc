@@ -98,7 +98,7 @@ int main(int argc, char **argv) {
     if (strchr(file, '/') != NULL) {
         char *filecpy = strdup(file);
         char *tok = strtok(filecpy, "/");
-        char *prev_tok;
+        char *prev_tok = tok;
 
         while (tok != NULL) {
             prev_tok = tok;
