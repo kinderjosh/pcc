@@ -93,16 +93,31 @@ int main(int argc, char **argv) {
     ast_del(root);
 
     char *outasm;
-    char *outbase = strdup(file);
+    char *outbase;
 
-    if (strchr(file, '.') != NULL) {
+    if (strchr(file, '/') != NULL) {
+        char *filecpy = strdup(file);
+        char *tok = strtok(filecpy, "/");
+        char *prev_tok;
+
+        while (tok != NULL) {
+            prev_tok = tok;
+            tok = strtok(NULL, "/");
+        }
+
+        outbase = strdup(prev_tok);
+        free(filecpy);
+    } else
+        outbase = strdup(file);
+
+    if (strchr(outbase, '.') != NULL) {
         char *tok = strtok(outbase, ".");
 
         outasm = calloc(strlen(tok) + 5, sizeof(char));
         sprintf(outasm, "%s.asm", tok);
     } else {
         outasm = calloc(strlen(file) + 5, sizeof(char));
-        sprintf(outasm, "%s.asm", file);
+        sprintf(outasm, "%s.asm", outbase);
     }
 
     FILE *f = fopen(outasm, "w");
@@ -121,8 +136,8 @@ int main(int argc, char **argv) {
         return EXIT_SUCCESS;
     }
 
-    char *nasm = calloc(strlen(outasm) + strlen(outbase) + 32, sizeof(char));
-    sprintf(nasm, "nasm -felf64 %s -o %s.o", outasm, outbase);
+    char *nasm = calloc((strlen(outasm) * 2) + strlen(outbase) + 64, sizeof(char));
+    sprintf(nasm, "nasm -felf64 %s -o %s.o && rm %s", outasm, outbase, outasm);
 
     if (system(nasm) != 0) {
         fprintf(stderr, "%s: Error: Failed to assemble.\n", file);
@@ -130,19 +145,21 @@ int main(int argc, char **argv) {
     }
 
     if (!link) {
+        free(nasm);
         free(outasm);
         free(outbase);
         return EXIT_SUCCESS;
     }
 
-    nasm = realloc(nasm, ((strlen(outbase) * 2) + strlen(out) + 32) * sizeof(char));
-    sprintf(nasm, "ld %s.o -o %s && rm %s.o", outbase, out, outbase);
+    nasm = realloc(nasm, ((strlen(outbase) * 2) + strlen(out) + 64) * sizeof(char));
+    sprintf(nasm, "ld -emain_ %s.o -o %s && rm %s.o", outbase, out, outbase);
 
     if (system(nasm) != 0) {
         fprintf(stderr, "%s: Error: Failed to link.\n", file);
         exit(EXIT_FAILURE);
     }
 
+    free(nasm);
     free(outasm);
     free(outbase);
     return EXIT_SUCCESS;
