@@ -33,14 +33,14 @@ int main(int argc, char **argv) {
             link = false;
         else if (strcmp(argv[i], "-o") == 0) {
             if (i == argc - 1) {
-                fprintf(stderr, "tcc: Error: Missing argument <output file> to option '-o'.\n");
+                fprintf(stderr, "pcc: Error: Missing argument <output file> to option '-o'.\n");
                 return EXIT_FAILURE;
             }
 
             out = argv[++i];
         } else if (strcmp(argv[i], "-t") == 0) {
             if (i == argc - 1) {
-                fprintf(stderr, "tcc: Error: Missing argument <test directory> to option '-t'.\n");
+                fprintf(stderr, "pcc: Error: Missing argument <test directory> to option '-t'.\n");
                 return EXIT_FAILURE;
             }
 
@@ -50,13 +50,13 @@ int main(int argc, char **argv) {
         else if (i == argc - 1 && test_dir == NULL)
             file = argv[i];
         else {
-            fprintf(stderr, "tcc: Error: Unknown argument '%s'.\n", argv[i]);
+            fprintf(stderr, "pcc: Error: Unknown argument '%s'.\n", argv[i]);
             return EXIT_FAILURE;
         }
     }
 
     if (file == NULL && test_dir == NULL) {
-        fprintf(stderr, "tcc: Error: Missing argument <input file>.\n");
+        fprintf(stderr, "pcc: Error: Missing argument <input file>.\n");
         return EXIT_FAILURE;
     } else if (test_dir != NULL) {
         if (test_dir[strlen(test_dir) - 1] == '/')
@@ -64,7 +64,7 @@ int main(int argc, char **argv) {
 
         DIR *dr = opendir(test_dir);
         if (dr == NULL) {
-            fprintf(stderr, "tcc: Error: Failed to open test directory '%s'.\n", test_dir);
+            fprintf(stderr, "pcc: Error: Failed to open test directory '%s'.\n", test_dir);
             return EXIT_FAILURE;
         }
 

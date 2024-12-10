@@ -1,9 +1,9 @@
-# TCC - Tuned C Compiler
+# PCC - Perfect C Compiler
 
 > [!IMPORTANT]
-> TCC is still a work-in-progress, expect bugs and missing features.
+> PCC is still a work-in-progress, expect bugs and missing features.
 
-TCC is my own implementation of the C language. It only compiles for x86-64 Linux systems, assembled with [nasm](https://nasm.us). It doesn't use LLVM, the whole thing is built completely from scratch.
+PCC is my own implementation of the C language. It only compiles for x86-64 Linux systems, assembled with [nasm](https://nasm.us). It doesn't use LLVM, the whole thing is built completely from scratch.
 
 ## Development Progress
 
@@ -25,15 +25,15 @@ TCC is my own implementation of the C language. It only compiles for x86-64 Linu
 ## Quick Start
 
 ```bash
-git clone https://github.com/kinderjosh/tcc.git
-cd tcc
+git clone https://github.com/kinderjosh/pcc.git
+cd pcc
 make
 ```
 
 ## Usage
 
 ```
-./tcc [options...] <input file>
+./pcc [options...] <input file>
 ```
 
 ### Options

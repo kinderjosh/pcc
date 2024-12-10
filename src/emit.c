@@ -385,7 +385,7 @@ char *emit_ast(AST *ast) {
         case AST_ASSIGN: return emit_assign(ast);
         case AST_RET: return emit_ret(ast);
         default:
-            fprintf(stderr, "tcc: Error: Missing backend for '%s'.\n", ast_types[ast->type]);
+            fprintf(stderr, "pcc: Error: Missing backend for '%s'.\n", ast_types[ast->type]);
             exit(EXIT_FAILURE);
     }
 }
