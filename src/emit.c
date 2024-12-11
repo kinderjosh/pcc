@@ -960,7 +960,7 @@ char *emit_math_expr(AST *left, AST *right, TokType type) {
             break;
         default:
             if (right->data.digit >= 0 && is_power_of_two((unsigned int)right->data.digit))
-                sprintf(math, "    and %s, %u\n", left_value, power_of_two((unsigned int)right->data.digit) - 1);
+                sprintf(math, "    and %s, %u\n", left_value, (unsigned int)right->data.digit - 1);
             else
                 sprintf(math, "    xor rdi, rdi\n"
                               "    idiv %s\n"

@@ -167,7 +167,7 @@ AST *prs_math(Prs *prs, AST *first) {
     AST *value;
     bool is_float = ast_is_float(first);
     bool contains_mod = false;
-    bool is_const = first->type != AST_INT || first->type != AST_FLOAT ? true : false;
+    bool is_const = first->type == AST_INT || first->type == AST_FLOAT ? true : false;
 
     expr[0] = first;
     prs->in_math = true;
