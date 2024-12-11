@@ -6,6 +6,7 @@
 #include <string.h>
 #include <stdbool.h>
 #include <assert.h>
+#include <errno.h>
 
 #define SUB_RSP_SIZE (size_t)32
 
@@ -62,6 +63,7 @@ size_t rsp_cap = 0;
 size_t float_cnt = 0;
 char *func_data;
 char *sect_data;
+bool float_math_result = false;
 
 void globs_reset() {
     rsp = rsp_cap = float_cnt = 0;
@@ -83,6 +85,14 @@ size_t float_init(size_t bits, long double value) {
     strcat(func_data, data);
     free(data);
     return float_cnt++;
+}
+
+unsigned int power_of_two(unsigned int n) {
+    return 1ULL << n;
+}
+
+bool is_power_of_two(unsigned int x) {
+    return x != 0 && (x & (x - 1)) == 0;
 }
 
 char *emit_arr(AST **arr, size_t cnt) {
@@ -279,6 +289,8 @@ char *emit_call_arg(AST *ast, char *param_type, char *reg) {
 
     return code;
 }
+
+char *emit_math(AST *ast);
 
 char *emit_call(AST *ast) {
     char *code = calloc(1, sizeof(char));
@@ -530,6 +542,35 @@ char *emit_assign(AST *ast) {
             free(temp);
             break;
         }
+        case AST_MATH: {
+            code = emit_ast(value);
+            char *fix = calloc(strlen(rbp) + 128, sizeof(char));
+
+            if (strcmp(type, "char") == 0) {
+                if (float_math_result)
+                    sprintf(fix, "    cvttss2si eax, xmm0\n"
+                                 "    mov byte %s, al\n", rbp);
+                else
+                    sprintf(fix, "    mov byte %s, al\n", rbp);
+            } else if (strcmp(type, "int") == 0) {
+                if (float_math_result)
+                    sprintf(fix, "    cvttss2si eax, xmm0\n"
+                                 "    mov dword %s, eax\n", rbp);
+                else
+                    sprintf(fix, "    mov dword %s, eax\n", rbp);
+            } else {
+                if (float_math_result)
+                    sprintf(fix, "    movss dword %s, xmm0\n", rbp);
+                else
+                    sprintf(fix, "    cvtsi2ss xmm0, eax\n"
+                                 "    movss dword %s, xmm0\n", rbp);
+            }
+
+            code = realloc(code, (strlen(code) + strlen(fix) + 1) * sizeof(char));
+            strcat(code, fix);
+            free(fix);
+            break;
+        }
         default: assert(false);
     }
 
@@ -614,11 +655,433 @@ char *emit_ret(AST *ast) {
             free(temp);
             break;
         }
+        case AST_MATH: {
+            code = emit_ast(value);
+
+            if (strcmp(type, "float") == 0 && !float_math_result) {
+                code = realloc(code, (strlen(code) + 32) * sizeof(char));
+                strcat(code, "    cvtsi2ss xmm0, eax\n");
+            } else if (strcmp(type, "float") != 0 && float_math_result) {
+                code = realloc(code, (strlen(code) + 32) * sizeof(char));
+                strcat(code, "    cvttss2si eax, xmm0\n");
+            }
+            break;
+        }
         default: assert(false);
     }
 
     code = realloc(code, (strlen(code) + strlen(ret) + 1) * sizeof(char));
     strcat(code, ret);
+    return code;
+}
+
+char *emit_math_expr(AST *left, AST *right, TokType type) {
+    char *code;
+    char left_value[64];
+    char right_value[64];
+    char *setup = NULL;
+    bool is_float = false;
+
+    switch (left->type) {
+        case AST_INT:
+            code = calloc(64, sizeof(char));
+            sprintf(code, "    mov eax, %d\n", (int)left->data.digit);
+            break;
+        case AST_FLOAT:
+            code = calloc(64, sizeof(char));
+            sprintf(code, "    movss xmm0, dword [.f%zu]\n", float_init(32, left->data.digit));
+            is_float = true;
+            break;
+        case AST_VAR: {
+            AST *var = sym_find(AST_ASSIGN, left->scope_def, left->var.name);
+            code = calloc(strlen(var->assign.rbp) + 64, sizeof(char));
+
+            if (strcmp(var->assign.type, "char") == 0)
+                sprintf(code, "    movsx eax, byte %s\n", var->assign.rbp);
+            else if (strcmp(var->assign.type, "int") == 0)
+                sprintf(code, "    mov eax, dword %s\n", var->assign.rbp);
+            else {
+                sprintf(code, "    movss xmm0, dword %s\n", var->assign.rbp);
+                is_float = true;
+            }
+            break;
+        }
+        case AST_CALL: {
+            code = emit_ast(left);
+            AST *sym = sym_find(AST_FUNC, "<global>", left->call.name);
+
+            if (strcmp(sym->func.type, "float") == 0)
+                is_float = true;
+            break;
+        }
+        case AST_MATH_VAR: {
+            is_float = left->math_var.is_float;
+
+            if (left->math_var.stack_rbp != NULL) {
+                code = calloc(strlen(left->math_var.stack_rbp) + 64, sizeof(char));
+
+                if (left->math_var.is_float)
+                    sprintf(code, "    movss xmm0, dword %s\n", left->math_var.stack_rbp);
+                else
+                    sprintf(code, "    mov eax, dword %s\n", left->math_var.stack_rbp);
+                break;
+            }
+
+            code = calloc(1, sizeof(char));
+            break;
+        }
+        default: assert(false);
+    }
+
+    if (is_float)
+        strcpy(left_value, "xmm0");
+    else
+        strcpy(left_value, "eax");
+
+    switch (right->type) {
+        case AST_INT:
+            if (is_float) {
+                setup = calloc(64, sizeof(char));
+                sprintf(setup, "    mov eax, %d\n"
+                               "    cvtsi2ss xmm1, eax\n", (int)right->data.digit);
+                strcpy(right_value, "xmm1");
+            } else
+                sprintf(right_value, "%d", (int)right->data.digit);
+            break;
+        case AST_FLOAT:
+            if (!is_float) {
+                setup = calloc(32, sizeof(char));
+                strcpy(setup, "    cvtsi2ss xmm0, eax\n");
+                strcpy(left_value, "xmm0");
+                is_float = true;
+            }
+
+            sprintf(right_value, "dword [.f%zu]", float_init(32, right->data.digit));
+            break;
+        case AST_VAR: {
+            AST *var = sym_find(AST_ASSIGN, right->scope_def, right->var.name);
+
+            if (is_float) {
+                if (strcmp(var->assign.type, "char") == 0) {
+                    setup = calloc(strlen(var->assign.rbp) + 64, sizeof(char));
+                    sprintf(setup, "    movsx eax, byte %s\n"
+                                   "    cvtsi2ss xmm1, eax\n", var->assign.rbp);
+                    strcpy(right_value, "xmm1");
+                } else if (strcmp(var->assign.type, "int") == 0) {
+                    setup = calloc(strlen(var->assign.rbp) + 64, sizeof(char));
+                    sprintf(setup, "    cvtsi2ss xmm1, dword %s\n", var->assign.rbp);
+                    strcpy(right_value, "xmm1");
+                } else
+                    sprintf(right_value, "dword %s", var->assign.rbp);
+            } else {
+                if (strcmp(var->assign.type, "char") == 0) {
+                    setup = calloc(strlen(var->assign.rbp) + 64, sizeof(char));
+                    sprintf(setup, "    movsx ebx, byte %s\n", var->assign.rbp);
+                    strcpy(right_value, "ebx");
+                } else if (strcmp(var->assign.type, "int") == 0)
+                    sprintf(right_value, "dword %s", var->assign.rbp);
+                else {
+                    setup = calloc(32, sizeof(char));
+                    sprintf(setup, "    cvtsi2ss xmm0, eax\n");
+                    strcpy(left_value, "xmm0");
+                    sprintf(right_value, "dword %s", var->assign.rbp);
+                    is_float = true;
+                }
+            }
+            break;
+        }
+        case AST_CALL: {
+            AST *sym = sym_find(AST_FUNC, "<global>", right->call.name);
+            rsp += 8;
+            setup = emit_ast(right);
+            char *save;
+
+            // Please forgive me for this awful looking code
+            if (is_float) {
+                if (rsp + 8 > rsp_cap) {
+                    rsp_cap += 8;
+                    save = calloc(strlen(setup) + 128, sizeof(char));
+                    rsp_cap -= 8;
+
+                    if (strcmp(sym->func.type, "float") == 0)
+                        sprintf(save, "    sub rsp, 8\n"
+                                      "    movss dword [rbp-%zu], xmm0\n"
+                                      "%s"
+                                      "    movss xmm1, xmm0\n"
+                                      "    movss xmm0, dword [rbp-%zu]\n"
+                                      "    add rsp, 8\n", rsp + 8, setup, rsp + 8);
+                    else
+                        sprintf(save, "    sub rsp, 8\n"
+                                      "    movss dword [rbp-%zu], xmm0\n"
+                                      "%s"
+                                      "    movss xmm0, dword [rbp-%zu]\n"
+                                      "    cvtsi2ss xmm1, eax\n"
+                                      "    add rsp, 8\n", rsp + 8, setup, rsp + 8);
+                } else {
+                    save = calloc(strlen(setup) + 128, sizeof(char));
+
+                    if (strcmp(sym->func.type, "float") == 0)
+                        sprintf(save, "    movss dword [rbp-%zu], xmm0\n"
+                                      "%s"
+                                      "    movss xmm1, xmm0\n"
+                                      "    movss xmm0, dword [rbp-%zu]\n", rsp + 8, setup, rsp + 8);
+                    else
+                        sprintf(save, "    movss dword [rbp-%zu], xmm0\n"
+                                      "%s"
+                                      "    movss xmm0, dword [rbp-%zu]\n"
+                                      "    cvtsi2ss xmm1, eax\n", rsp + 8, setup, rsp + 8);
+                }
+
+                strcpy(left_value, "xmm0");
+                strcpy(right_value, "xmm1");
+            } else {
+                rsp_cap += 8;
+                save = calloc(strlen(setup) + 128, sizeof(char));
+                rsp_cap -= 8;
+
+                if (strcmp(sym->func.type, "float") == 0) {
+                    sprintf(save, "    push rax\n"
+                                  "%s"
+                                  "    movss xmm1, xmm0\n"
+                                  "    pop rax\n"
+                                  "    cvtsi2ss xmm0, eax\n", setup);
+
+                    strcpy(left_value, "xmm0");
+                    strcpy(right_value, "xmm1");
+                    is_float = true;
+                } else {
+                    sprintf(save, "    push rax\n"
+                                  "%s"
+                                  "    mov ebx, eax\n"
+                                  "    pop rax\n", setup);
+                    strcpy(right_value, "ebx");
+                }
+            }
+
+            rsp -= 8;
+            free(setup);
+            setup = save;
+            break;
+        }
+        case AST_MATH_VAR: {
+            if (right->math_var.stack_rbp != NULL) {
+                if (is_float) {
+                    if (right->math_var.is_float)
+                        sprintf(right_value, "dword %s", right->math_var.stack_rbp);
+                    else {
+                        setup = calloc(strlen(right->math_var.stack_rbp) + 64, sizeof(char));
+                        sprintf(setup, "    cvtsi2ss xmm1, dword %s\n", right->math_var.stack_rbp);
+                        strcpy(right_value, "xmm1");
+                    }
+                } else {
+                    if (right->math_var.is_float) {
+                        setup = calloc(64, sizeof(char));
+                        strcpy(setup, "    cvtsi2ss xmm0, eax\n");
+                        strcpy(left_value, "xmm0");
+                        is_float = true;
+                    }
+                    
+                    sprintf(right_value, "dword %s", right->math_var.stack_rbp);
+                }
+                break;
+            }
+
+            // It's ensured that xmm0 or eax won't have been corrupted by, for example, a call by left,
+            // it is only in the reg if it will not be corrupted
+            char *temp = calloc(strlen(code) + 64, sizeof(char));
+
+            if (is_float) {
+                if (right->math_var.is_float)
+                    strcpy(temp, "    movss xmm1, xmm0\n");
+                else
+                    sprintf(temp, "    cvtsi2ss xmm1, eax\n");
+                
+                strcpy(right_value, "xmm1");
+            } else {
+                if (right->math_var.is_float) {
+                    strcpy(temp, "    movss xmm1, xmm0\n");
+                    code = realloc(code, (strlen(code) + 32) * sizeof(char));
+                    strcat(code, "    cvtsi2ss xmm0, eax\n");
+
+                    strcpy(left_value, "xmm0");
+                    strcpy(right_value, "xmm1");
+                } else {
+                    sprintf(temp, "    mov ebx, eax\n");
+                    strcpy(right_value, "ebx");
+                }
+            }
+
+            strcat(temp, code);
+            free(code);
+            code = temp;
+            break;
+        }
+        default:  printf(">>>%s\n", ast_types[right->type]); assert(false);
+    }
+
+    if (setup != NULL) {
+        code = realloc(code, (strlen(code) + strlen(setup) + 1) * sizeof(char));
+        strcat(code, setup);
+        free(setup);
+    }
+
+    char *math = calloc(strlen(left_value) + strlen(right_value) + 256, sizeof(char));
+
+    switch (type) {
+        case TOK_PLUS:
+            if (is_float)
+                sprintf(math, "    addss %s, %s\n", left_value, right_value);
+            else
+                sprintf(math, "    add %s, %s\n", left_value, right_value);
+            break;
+        case TOK_MINUS:
+            if (is_float)
+                sprintf(math, "    subss %s, %s\n", left_value, right_value);
+            else
+                sprintf(math, "    sub %s, %s\n", left_value, right_value);
+            break;
+        case TOK_STAR:
+            if (is_float)
+                sprintf(math, "    mulss %s, %s\n", left_value, right_value);
+            else
+                sprintf(math, "    imul %s, %s\n", left_value, right_value);
+            break;
+        case TOK_SLASH:
+            if (is_float) {
+                sprintf(math, "    divss %s, %s\n", left_value, right_value);
+                break;
+            }
+
+            if (right->data.digit >= 0 && is_power_of_two((unsigned int)right->data.digit))
+                sprintf(math, "    sar %s, %u\n", left_value, power_of_two((unsigned int)right->data.digit));
+            else
+                sprintf(math, "    cqo\n"
+                              "    idiv %s\n", right_value);
+            break;
+        default:
+            if (right->data.digit >= 0 && is_power_of_two((unsigned int)right->data.digit))
+                sprintf(math, "    and %s, %u\n", left_value, power_of_two((unsigned int)right->data.digit) - 1);
+            else
+                sprintf(math, "    xor rdi, rdi\n"
+                              "    idiv %s\n"
+                              "    mov eax, edx\n", right_value);
+            break;
+    }
+
+    code = realloc(code, (strlen(code) + strlen(math) + 1) * sizeof(char));
+    strcat(code, math);
+    free(math);
+
+    float_math_result = is_float;
+    return code;
+}
+
+char *emit_math(AST *ast) {
+    char *code = calloc(1, sizeof(char));
+    char *next;
+
+    AST **expr = ast->math.expr;
+    size_t expr_cnt = ast->math.expr_cnt;
+
+    bool is_float = false;
+    size_t oper_cnt = expr_cnt / 2;
+    size_t order[oper_cnt];
+    size_t order_cnt = 0;
+
+    for (size_t i = 1; i < expr_cnt; i += 2) {
+        if (expr[i]->oper.kind != TOK_PLUS && expr[i]->oper.kind != TOK_MINUS)
+            order[order_cnt++] = i;
+    }
+
+    for (size_t i = 1; i < expr_cnt; i += 2) {
+        if (expr[i]->oper.kind == TOK_PLUS || expr[i]->oper.kind == TOK_MINUS)
+            order[order_cnt++] = i;
+    }
+
+    AST *left;
+    AST *right;
+    AST *oper;
+    AST *next_left;
+    size_t oper_pos;
+    size_t next_oper_pos;
+    int j;
+    
+    size_t beg_rsp = rsp;
+    size_t beg_cap = rsp_cap;
+
+    for (size_t i = 0; i < oper_cnt; i++) {
+        oper_pos = order[i];
+        oper = expr[oper_pos];
+        oper->active = false;
+
+        j = 0;
+        left = expr[oper_pos - 1];
+        while (!left->active)
+            left = expr[oper_pos + --j];
+
+        j = 0;
+        right = expr[oper_pos + 1];
+        while (!right->active)
+            right = expr[oper_pos + ++j];
+
+        assert(left != NULL);
+        assert(right != NULL);
+
+        next = emit_math_expr(left, right, oper->oper.kind);
+        code = realloc(code, (strlen(code) + strlen(next) + 1) * sizeof(char));
+        strcat(code, next);
+        free(next);
+
+        if (!is_float)
+            is_float = float_math_result;
+
+        right->active = false;
+
+        if (i == oper_cnt - 1)
+            break;
+
+        ast_fields_del(left);
+        left->type = AST_MATH_VAR;
+        left->math_var.is_float = is_float;
+        next_oper_pos = order[i + 1];
+
+        if (abs((int)oper_pos - (int)next_oper_pos) > 2 && i != oper_cnt - 2) {
+save_math_result:
+            // Not used in the next expression, needs to be saved to the stack
+            char *save = calloc(128, sizeof(char));
+            rsp += 8;
+            rsp_cap += 8;
+
+            if (is_float)
+                sprintf(save, "    movss dword [rbp-%zu], xmm0\n", rsp);
+            else
+                sprintf(save, "    mov dword [rbp-%zu], eax\n", rsp);
+
+            code = realloc(code, (strlen(code) + strlen(save) + 1) * sizeof(char));
+            strcat(code, save);
+            free(save);
+
+            left->math_var.stack_rbp = calloc(64, sizeof(char));
+            sprintf(left->math_var.stack_rbp, "[rbp-%zu]", rsp);
+            break;
+        }
+
+        next_left = expr[order[i + 1] - 1];
+        while (!next_left->active)
+            next_left = expr[order[i + 1] + --j];
+
+        if (next_left->type == AST_CALL) // Will corrupt the reg so must be saved
+            goto save_math_result;
+
+        // Used in the next expression, no need to save to the stack
+        left->math_var.reg_name = is_float ? "xmm0" : "eax";
+        left->math_var.stack_rbp = NULL;
+    }
+
+    rsp = beg_rsp;
+    rsp_cap = beg_cap;
+
+    float_math_result = is_float;
     return code;
 }
 
@@ -629,6 +1092,7 @@ char *emit_ast(AST *ast) {
         case AST_CALL: return emit_call(ast);
         case AST_ASSIGN: return emit_assign(ast);
         case AST_RET: return emit_ret(ast);
+        case AST_MATH: return emit_math(ast);
         default:
             fprintf(stderr, "pcc: Error: Missing backend for '%s'.\n", ast_types[ast->type]);
             exit(EXIT_FAILURE);

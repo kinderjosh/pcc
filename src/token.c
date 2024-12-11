@@ -13,7 +13,12 @@ const char *tok_types[] = {
     [TOK_RBRACE] = "right brace",
     [TOK_SEMI] = "semicolon",
     [TOK_COMMA] = "Comma",
-    [TOK_EQUAL] = "Equal"
+    [TOK_EQUAL] = "Equal",
+    [TOK_PLUS] = "Plus",
+    [TOK_MINUS] = "Minus",
+    [TOK_STAR] = "Star",
+    [TOK_SLASH] = "Slash",
+    [TOK_PERCENT] = "Percent"
 };
 
 Tok *tok_init(TokType type, char *value, size_t ln, size_t col) {

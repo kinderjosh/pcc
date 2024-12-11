@@ -8,6 +8,7 @@
 #include <stdbool.h>
 #include <limits.h>
 #include <errno.h>
+#include <assert.h>
 
 extern const char *tok_types[];
 extern const char *ast_types[];
@@ -41,6 +42,54 @@ bool is_type(char *id) {
     return false;
 }
 
+bool ast_is_float(AST *ast) {
+    AST *sym;
+
+    switch (ast->type) {
+        case AST_FLOAT: return true;
+        case AST_VAR:
+            sym = sym_find(AST_ASSIGN, ast->scope_def, ast->var.name);
+            if (strcmp(sym->assign.type, "float") == 0)
+                return true;
+            break;
+        case AST_FUNC:
+            sym = sym_find(AST_FUNC, "<global>", ast->func.name);
+            if (strcmp(sym->func.type, "float") == 0)
+                return true;
+            break;
+        case AST_CALL:
+            sym = sym_find(AST_FUNC, "<global>", ast->call.name);
+            if (strcmp(sym->func.type, "float") == 0)
+                return true;
+            break;
+        default: break;
+    }
+
+    return false;
+}
+
+bool digit_is_float(long double digit) {
+    char buf[80];
+    sprintf(buf, "%Lf", digit);
+
+    char *tok = strtok(buf, ".");
+    if (tok == NULL)
+        return false;
+
+    tok = strtok(NULL, ".");
+    assert(tok != NULL);
+
+    char *endptr;
+    long long int mantissa = strtoll(tok, &endptr, 10);
+
+    if (endptr == tok || errno == ERANGE)
+        return false;
+    else if (mantissa > 0)
+        return true;
+
+    return false;
+}
+
 Prs *prs_init(char *file) {
     Prs *prs = malloc(sizeof(Prs));
     prs->file = file;
@@ -48,6 +97,7 @@ Prs *prs_init(char *file) {
     prs->tok = lex_next(prs->lex);
     prs->cur_scope = strdup("<global>");
     prs->cur_func = strdup("<global>");
+    prs->in_math = false;
     return prs;
 }
 
@@ -108,11 +158,138 @@ AST **prs_body(Prs *prs, size_t *cnt, bool allow_no_braces) {
     return body;
 }
 
+AST *prs_value(Prs *prs, char *type);
+
+AST *prs_math(Prs *prs, AST *first) {
+    AST **expr = calloc(1, sizeof(AST *));
+    size_t expr_cnt = 1;
+    AST *oper;
+    AST *value;
+    bool is_float = ast_is_float(first);
+    bool contains_mod = false;
+    bool is_const = first->type != AST_INT || first->type != AST_FLOAT ? true : false;
+
+    expr[0] = first;
+    prs->in_math = true;
+
+    while (prs->tok->type == TOK_PLUS || prs->tok->type == TOK_MINUS || prs->tok->type == TOK_STAR || prs->tok->type == TOK_SLASH || prs->tok->type == TOK_PERCENT) {
+        oper = ast_init(AST_OPER, prs->cur_scope, prs->cur_func, prs->tok->ln, prs->tok->col);
+        oper->oper.kind = prs_eat(prs, prs->tok->type);
+
+        if (oper->oper.kind == TOK_PERCENT)
+            contains_mod = true;
+
+        value = prs_value(prs, is_float ? "float" : "int");
+
+        if (is_const && (value->type != AST_INT && value->type != AST_FLOAT))
+            is_const = false;
+
+        if (!is_float)
+            is_float = ast_is_float(value);
+
+        expr = realloc(expr, (expr_cnt + 2) * sizeof(AST *));
+        expr[expr_cnt++] = oper;
+        expr[expr_cnt++] = value;
+    }
+
+    prs->in_math = false;
+
+    if (is_float && contains_mod) {
+        fprintf(stderr, "%s:%zu:%zu: Error: Modulus operator used where a float result may occur; consider using casts.\n", prs->file, first->ln, first->col);
+        exit(EXIT_FAILURE);
+    }
+
+    if (is_const) {
+        size_t oper_cnt = expr_cnt / 2;
+        size_t order[oper_cnt];
+        size_t order_cnt = 0;
+
+        for (size_t i = 1; i < expr_cnt; i += 2) {
+            if (expr[i]->oper.kind != TOK_PLUS && expr[i]->oper.kind != TOK_MINUS)
+                order[order_cnt++] = i;
+        }
+
+        for (size_t i = 1; i < expr_cnt; i += 2) {
+            if (expr[i]->oper.kind == TOK_PLUS || expr[i]->oper.kind == TOK_MINUS)
+                order[order_cnt++] = i;
+        }
+
+        AST *left;
+        AST *right;
+        size_t oper_pos;
+        int j;
+        long double result = 0;
+
+        for (size_t i = 0; i < oper_cnt; i++) {
+            oper_pos = order[i];
+            oper = expr[oper_pos];
+            oper->active = false;
+
+            j = 0;
+            left = expr[oper_pos - 1];
+            while (!left->active)
+                left = expr[oper_pos + --j];
+
+            j = 0;
+            right = expr[oper_pos + 1];
+            while (!right->active)
+                right = expr[oper_pos + ++j];
+
+            assert(left != NULL);
+            assert(right != NULL);
+
+            switch (oper->oper.kind) {
+                case TOK_PLUS:
+                    result = left->data.digit + right->data.digit;
+                    break;
+                case TOK_MINUS:
+                    result = left->data.digit - right->data.digit;
+                    break;
+                case TOK_STAR:
+                    result = left->data.digit * right->data.digit;
+                    break;
+                case TOK_SLASH:
+                    result = left->data.digit / right->data.digit;
+                    break;
+                default:
+                    result = (int)left->data.digit % (int)right->data.digit;
+                    break;
+            }
+
+            left->data.digit = result;
+            left->type = digit_is_float(result) ? AST_FLOAT : AST_INT;
+            
+            if (!is_float)
+                is_float = ast_is_float(left);
+
+            right->active = false;
+        }
+
+        // Start at 1 so it doesn't free AST *first yet
+        for (size_t i = 1; i < expr_cnt; i++) {
+            if (expr[i] != NULL)
+                ast_del(expr[i]);
+        }
+
+        free(expr);
+
+        AST *ast = ast_init(digit_is_float(result) ? AST_FLOAT : AST_INT, first->scope_def, first->func_def, first->ln, first->col);
+        ast->data.digit = result;
+        ast_del(first);
+        return ast;
+    }
+
+    AST *ast = ast_init(AST_MATH, first->scope_def, first->func_def, first->ln, first->col);
+    ast->math.expr = expr;
+    ast->math.expr_cnt = expr_cnt;
+    return ast;
+}
+
 AST *prs_value(Prs *prs, char *type) {
     AST *value = prs_stmt(prs);
 
     if (type == NULL)
-        return value;
+        goto check_math;
 
     switch (value->type) {
         case AST_INT:
@@ -134,10 +311,15 @@ AST *prs_value(Prs *prs, char *type) {
             }
             break;
         }
+        case AST_MATH: break;
         default:
             fprintf(stderr, "%s:%zu:%zu: Error: Invalid value '%s'.\n", prs->file, value->ln, value->col, ast_types[value->type]);
             exit(EXIT_FAILURE);
     }
+
+check_math:
+    if (!prs->in_math && (prs->tok->type == TOK_PLUS || prs->tok->type == TOK_MINUS || prs->tok->type == TOK_STAR || prs->tok->type == TOK_SLASH || prs->tok->type == TOK_PERCENT))
+        return prs_math(prs, value);
 
     return value;
 }
@@ -146,6 +328,11 @@ AST *prs_id_func(Prs *prs, char *name, char *type, size_t ln, size_t col) {
     AST *sym = sym_find(AST_FUNC, "<global>", name);
     if (sym != NULL) {
         fprintf(stderr, "%s:%zu:%zu: Error: Redefinition of function '%s'; first defined at %zu:%zu.\n", prs->file, ln, col, name, sym->ln, sym->col);
+        exit(EXIT_FAILURE);
+    }
+
+    if (strcmp(name, "main") == 0 && strcmp(type, "void") != 0) {
+        fprintf(stderr, "%s:%zu:%zu: Error: Entrypoint 'main' must have type 'void'.\n", prs->file, ln, col);
         exit(EXIT_FAILURE);
     }
 

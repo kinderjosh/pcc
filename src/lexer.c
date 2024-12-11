@@ -168,6 +168,11 @@ Tok *lex_next(Lex *lex) {
         case ';': return lex_step_with(lex, TOK_SEMI, ";");
         case ',': return lex_step_with(lex, TOK_COMMA, ",");
         case '=': return lex_step_with(lex, TOK_EQUAL, "=");
+        case '+': return lex_step_with(lex, TOK_PLUS, "+");
+        case '-': return lex_step_with(lex, TOK_MINUS, "-");
+        case '*': return lex_step_with(lex, TOK_STAR, "*");
+        case '/': return lex_step_with(lex, TOK_SLASH, "/");
+        case '%': return lex_step_with(lex, TOK_PERCENT, "%%");
         case '\0': return tok_init(TOK_EOF, strdup("<eof>"), lex->ln, lex->col);
         default: break;
     }

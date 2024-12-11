@@ -1,7 +1,9 @@
 #ifndef AST_H
 #define AST_H
 
+#include "token.h"
 #include <stdio.h>
+#include <stdbool.h>
 
 typedef enum {
     AST_ROOT,
@@ -11,7 +13,10 @@ typedef enum {
     AST_FUNC,
     AST_CALL,
     AST_ASSIGN,
-    AST_RET
+    AST_RET,
+    AST_MATH,
+    AST_OPER,
+    AST_MATH_VAR
 } ASTType;
 
 typedef struct AST AST;
@@ -22,6 +27,7 @@ typedef struct AST {
     char *func_def;
     size_t ln;
     size_t col;
+    bool active;
 
     union {
         struct {
@@ -63,10 +69,26 @@ typedef struct AST {
         struct {
             AST *value;
         } ret;
+
+        struct {
+            AST **expr;
+            size_t expr_cnt;
+        } math;
+
+        struct {
+            TokType kind;
+        } oper;
+
+        struct {
+            char *stack_rbp;
+            char *reg_name;
+            bool is_float;
+        } math_var;
     };
 } AST;
 
 AST *ast_init(ASTType type, char *scope_def, char *func_def, size_t ln, size_t col);
+void ast_fields_del(AST *ast);
 void ast_del(AST *ast);
 
 #endif

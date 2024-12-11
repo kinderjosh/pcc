@@ -4,6 +4,7 @@
 #include "token.h"
 #include "lexer.h"
 #include "ast.h"
+#include <stdbool.h>
 
 typedef struct {
     char *file;
@@ -11,6 +12,7 @@ typedef struct {
     char *cur_func;
     Lex *lex;
     Tok *tok;
+    bool in_math;
 } Prs;
 
 AST *sym_find(ASTType type, char *scope, char *name);

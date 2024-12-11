@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdbool.h>
 
 const char *ast_types[] = {
     [AST_ROOT] = "root",
@@ -11,7 +12,10 @@ const char *ast_types[] = {
     [AST_FUNC] = "function",
     [AST_CALL] = "function call",
     [AST_ASSIGN] = "assignment",
-    [AST_RET] = "return"
+    [AST_RET] = "return",
+    [AST_MATH] = "math expression",
+    [AST_OPER] = "operator",
+    [AST_MATH_VAR] = "math var"
 };
 
 AST *ast_init(ASTType type, char *scope_def, char *func_def, size_t ln, size_t col) {
@@ -21,10 +25,11 @@ AST *ast_init(ASTType type, char *scope_def, char *func_def, size_t ln, size_t c
     ast->func_def = strdup(func_def);
     ast->ln = ln;
     ast->col = col;
+    ast->active = true;
     return ast;
 }
 
-void ast_del(AST *ast) {
+void ast_fields_del(AST *ast) {
     switch (ast->type) {
         case AST_ROOT:
             for (size_t i = 0; i < ast->root.asts_cnt; i++)
@@ -69,9 +74,22 @@ void ast_del(AST *ast) {
             if (ast->ret.value != NULL)
                 ast_del(ast->ret.value);
             break;
+        case AST_MATH:
+            for (size_t i = 0; i < ast->math.expr_cnt; i++)
+                ast_del(ast->math.expr[i]);
+
+            free(ast->math.expr);
+            break;
+        case AST_MATH_VAR:
+            if (ast->math_var.stack_rbp != NULL)
+                free(ast->math_var.stack_rbp);
+            break;
         default: break;
     }
+}
 
+void ast_del(AST *ast) {
+    ast_fields_del(ast);
     free(ast->scope_def);
     free(ast->func_def);
     free(ast);
