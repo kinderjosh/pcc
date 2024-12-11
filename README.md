@@ -41,8 +41,8 @@ make
 ### Options
 
 - ```-c``` - Output only object files.
-- ```-o <output file>``` - Place the output into <output file>.
-- ```-t <test directory>``` - (Development only) Test each file in <test directory>.
+- ```-o <output file>``` - Place the output into ```<output file>```.
+- ```-t <test directory>``` - (Development only) Test each file in ```<test directory>```.
 - ```-S``` - Output only assembly files.
 
 ## License
