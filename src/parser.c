@@ -347,10 +347,7 @@ AST *prs_id_func(Prs *prs, char *name, char *type, size_t ln, size_t col) {
     prs_eat(prs, TOK_LPAREN);
 
     while (prs->tok->type != TOK_RPAREN && prs->tok->type != TOK_EOF) {
-        if (params_cnt == 6) {
-            fprintf(stderr, "%s:%zu:%zu: Error: Maximum parameter count of 6 exceeded.\n", prs->file, prs->tok->ln, prs->tok->col);
-            exit(EXIT_FAILURE);
-        } else if (params_cnt > 0)
+        if (params_cnt > 0)
             prs_eat(prs, TOK_COMMA);
 
         param = prs_stmt(prs);
@@ -456,10 +453,7 @@ AST *prs_id_call(Prs *prs, char *name, size_t ln, size_t col) {
     prs_eat(prs, TOK_LPAREN);
 
     while (prs->tok->type != TOK_RPAREN && prs->tok->type != TOK_EOF) {
-        if (args_cnt == 6) {
-            fprintf(stderr, "%s:%zu:%zu: Error: Maximum argument count of 6 exceeded.\n", prs->file, prs->tok->ln, prs->tok->col);
-            exit(EXIT_FAILURE);
-        } else if (args_cnt == sym->func.params_cnt) {
+        if (args_cnt == sym->func.params_cnt) {
             fprintf(stderr, "%s:%zu:%zu: Error: Excessive arguments in call to function '%s'; expected %zu but found %zu.\n", prs->file, ln, col, name, sym->func.params_cnt, args_cnt);
             exit(EXIT_FAILURE);
         } else if (args_cnt > 0)

@@ -42,7 +42,7 @@ const char *words[] = {
     [BYTE] = "byte"
 };
 
-const char *regs[][8] = {
+const char *regs[][16] = {
     [RAX] = { "rax", "eax", "ax", "al" },
     [RBX] = { "rbx", "ebx", "bx", "bl" },
     [RCX] = { "rcx", "ecx", "cx", "cl" },
@@ -53,7 +53,7 @@ const char *regs[][8] = {
     [RBP] = { "rbp", "ebp", "bp", "bpl" },
     [R8] = { "r8", "r8d", "r8w", "r8b" },
     [R9] = { "r9", "r9d", "r9w", "r9b" },
-    [XMM] = { "xmm0", "xmm1", "xmm2", "xmm3", "xmm4", "xmm5", "xmm6", "xmm7" }
+    [XMM] = { "xmm0", "xmm1", "xmm2", "xmm3", "xmm4", "xmm5", "xmm6", "xmm7", "xmm8", "xmm9", "xmm10", "xmm11", "xmm12", "xmm13", "xmm14", "xmm15" }
 };
 
 const size_t int_params[] = { RDI, RSI, RDX, RCX, R8, R9 };
@@ -161,19 +161,39 @@ char *emit_func(AST *ast) {
 
             if (strcmp(param->assign.type, "char") == 0) {
                 sprintf(rbp, "[rbp-%zu]", ++rsp);
-                sprintf(next, "    mov byte %s, %s\n", rbp, regs[int_params[ints++]][BYTE]);
+
+                if (ints > 5)
+                    sprintf(next, "    mov al, byte [rbp+%zu]\n"
+                                  "    mov byte %s, al\n", (ints - 4) * 8, rbp);
+                else
+                    sprintf(next, "    mov byte %s, %s\n", rbp, regs[int_params[ints++]][BYTE]);
             } else if (strcmp(param->assign.type, "int") == 0) {
                 rsp += 4;
                 sprintf(rbp, "[rbp-%zu]", rsp);
-                sprintf(next, "    mov dword %s, %s\n", rbp, regs[int_params[ints++]][DWORD]);
+
+                if (ints > 5)
+                    sprintf(next, "    mov eax, dword [rbp+%zu]\n"
+                                  "    mov dword %s, eax\n", (ints - 4) * 8, rbp);
+                else
+                    sprintf(next, "    mov dword %s, %s\n", rbp, regs[int_params[ints++]][DWORD]);
             } else if (strcmp(param->assign.type, "float") == 0) {
                 rsp += 4;
                 sprintf(rbp, "[rbp-%zu]", rsp);
-                sprintf(next, "    movss dword %s, %s\n", rbp, regs[XMM][++floats]);
+
+                if (floats > 14)
+                    sprintf(next, "    mov eax, dword [rbp+%zu]\n"
+                                  "    mov dword %s, eax\n", (ints - 4) * 8, rbp);
+                else
+                    sprintf(next, "    movss dword %s, %s\n", rbp, regs[XMM][++floats]);
             } else {
                 rsp += 8;
                 sprintf(rbp, "[rbp-%zu]", rsp);
-                sprintf(next, "    mov qword %s, %s\n", rbp, regs[int_params[ints++]][QWORD]);
+
+                if (ints > 5)
+                    sprintf(next, "    mov rax, qword [rbp+%zu]\n"
+                                  "    mov qword %s, rax\n", (ints - 4) * 8, rbp);
+                else
+                    sprintf(next, "    mov qword %s, %s\n", rbp, regs[int_params[ints++]][QWORD]);
             }
 
             param->assign.rbp = rbp;
@@ -221,63 +241,162 @@ char *emit_func(AST *ast) {
 
 char *emit_call(AST *ast);
 
-char *emit_call_arg(AST *ast, char *param_type, char *reg) {
+char *emit_call_arg(AST *ast, char *param_type, char *loc, bool on_stack) {
     char *code;
 
     switch (ast->type) {
         case AST_INT:
-            code = calloc(strlen(reg) + 128, sizeof(char));
+            code = calloc(strlen(loc) + 128, sizeof(char));
             
-            if (strcmp(param_type, "float") == 0)
-                sprintf(code, "    mov eax, %d\n"
-                              "    cvtsi2ss %s, eax\n", (int)ast->data.digit, reg);
-            else
-                sprintf(code, "    mov %s, %d\n", reg, (int)ast->data.digit);
+            if (strcmp(param_type, "float") == 0) {
+                if (on_stack)
+                    sprintf(code, "    mov eax, %d\n"
+                                  "    cvtsi2ss xmm0, eax\n"
+                                  "    movss dword %s, xmm0\n", (int)ast->data.digit, loc);
+                else
+                    sprintf(code, "    mov eax, %d\n"
+                                  "    cvtsi2ss %s, eax\n", (int)ast->data.digit, loc);
+            } else {
+                if (on_stack)
+                    sprintf(code, "    mov dword %s, %d\n", loc, (int)ast->data.digit);
+                else
+                    sprintf(code, "    mov %s, %d\n", loc, (int)ast->data.digit);
+            }
             break;
         case AST_FLOAT:
-            code = calloc(strlen(reg) + 64, sizeof(char));
-            sprintf(code, "    movss %s, dword [.f%zu]\n", reg, float_init(32, ast->data.digit));
+            code = calloc(strlen(loc) + 64, sizeof(char));
+
+            if (on_stack)
+                sprintf(code, "    movss xmm0, dword [.f%zu]\n"
+                              "    movss dword %s, xmm0\n", float_init(32, ast->data.digit), loc);
+            else
+                sprintf(code, "    movss %s, dword [.f%zu]\n", loc, float_init(32, ast->data.digit));
             break;
         case AST_VAR: {
             AST *var = sym_find(AST_ASSIGN, ast->scope_def, ast->var.name);
-            code = calloc(strlen(reg) + strlen(reg) + 128, sizeof(char));
+            code = calloc(strlen(loc) + strlen(loc) + 128, sizeof(char));
             
             if (strcmp(param_type, "char") == 0 || strcmp(param_type, "int") == 0) {
-                if (strcmp(var->assign.type, "char") == 0)
-                    sprintf(code, "    movsx %s, byte %s\n", reg, var->assign.rbp);
-                else if (strcmp(var->assign.type, "int") == 0)
-                    sprintf(code, "    mov %s, dword %s\n", reg, var->assign.rbp);
-                else
-                    sprintf(code, "    cvttss2si %s, dword %s\n", reg, var->assign.rbp);
+                if (strcmp(var->assign.type, "char") == 0) {
+                    if (on_stack)
+                        sprintf(code, "    movsx eax, byte %s\n"
+                                      "    mov dword %s, eax\n", var->assign.rbp, loc);
+                    else
+                        sprintf(code, "    movsx %s, byte %s\n", loc, var->assign.rbp);
+                } else if (strcmp(var->assign.type, "int") == 0) {
+                    if (on_stack)
+                        sprintf(code, "    mov eax, dword %s\n"
+                                      "    mov dword %s, eax\n", var->assign.rbp, loc);
+                    else
+                        sprintf(code, "    mov %s, dword %s\n", loc, var->assign.rbp);
+                } else {
+                    sprintf(code, "    cvttss2si %s, dword %s\n", loc, var->assign.rbp);
+                }
             } else if (strcmp(param_type, "float") == 0) {
-                if (strcmp(var->assign.type, "char") == 0)
-                    sprintf(code, "    movsx eax, byte %s\n"
-                                  "    cvtsi2ss %s, eax\n", var->assign.rbp, reg);
-                else if (strcmp(var->assign.type, "int") == 0)
-                    sprintf(code, "    cvtsi2ss %s, dword %s\n", reg, var->assign.rbp);
+                if (strcmp(var->assign.type, "char") == 0) {
+                    if (on_stack)
+                        sprintf(code, "    movsx eax, byte %s\n"
+                                      "    cvtsi2ss xmm0, eax\n"
+                                      "    movss dword %s, xmm0\n", var->assign.rbp, loc);
+                    else
+                        sprintf(code, "    movsx eax, byte %s\n"
+                                      "    cvtsi2ss %s, eax\n", var->assign.rbp, loc);
+                } else if (strcmp(var->assign.type, "int") == 0) {
+                    if (on_stack)
+                        sprintf(code, "    cvtsi2ss xmm0, dword %s\n"
+                                      "    movss dword %s, xmm0\n", var->assign.rbp, loc);
+                    else
+                        sprintf(code, "    cvtsi2ss %s, dword %s\n", loc, var->assign.rbp);
+                } else {
+                    if (on_stack)
+                        sprintf(code, "    movss xmm0, dword %s\n"
+                                      "    movss dword %s, xmm0\n", var->assign.rbp, loc);
+                    else
+                        sprintf(code, "    movss %s, dword %s\n", loc, var->assign.rbp);
+                }
+            } else {
+                if (on_stack)
+                    sprintf(code, "    mov rax, qword %s\n"
+                                  "    mov qword %s, rax\n", var->assign.rbp, loc);
                 else
-                    sprintf(code, "    movss %s, dword %s\n", reg, var->assign.rbp);
-            } else
-                sprintf(code, "    mov %s, qword %s\n", reg, var->assign.rbp);
+                    sprintf(code, "    mov %s, qword %s\n", loc, var->assign.rbp);
+            }
             break;
         }
         case AST_CALL: {
             code = emit_call(ast);
             char *call_type = sym_find(AST_FUNC, "<global>", ast->call.name)->func.type;
-            char *store = calloc(strlen(reg) + 64, sizeof(char));
+            char *store = calloc(strlen(loc) + 64, sizeof(char));
 
             if (strcmp(param_type, "char") == 0 || strcmp(param_type, "int") == 0) {
-                if (strcmp(call_type, "float") == 0)
-                    sprintf(store, "    cvttss2si %s, xmm0\n", reg);
-                else
-                    sprintf(store, "    mov %s, eax\n", reg);
+                if (strcmp(call_type, "float") == 0) {
+                    if (on_stack)
+                        sprintf(store, "    cvttss2si eax, xmm0\n"
+                                       "    mov dword %s, eax\n", loc);
+                    else
+                        sprintf(store, "    cvttss2si %s, xmm0\n", loc);
+                } else {
+                    if (on_stack)
+                        sprintf(store, "    mov dword %s, eax\n", loc);
+                    else
+                        sprintf(store, "    mov %s, eax\n", loc);
+                }
             } else if (strcmp(param_type, "float") == 0) {
-                if (strcmp(call_type, "float") == 0)
-                    sprintf(store, "    movss %s, xmm0\n", reg);
+                if (strcmp(call_type, "float") == 0) {
+                    if (on_stack)
+                        sprintf(store, "    movss dword %s, xmm0\n", loc);
+                    else
+                        sprintf(store, "    movss %s, xmm0\n", loc);
+                } else {
+                    if (on_stack)
+                        sprintf(store, "    cvtsi2ss xmm0, eax\n"
+                                       "    movss dword %s, xmm0\n", loc);
+                    else
+                        sprintf(store, "    cvtsi2ss %s, eax\n", loc);
+                }
+            } else {
+                if (on_stack)
+                    sprintf(store, "    mov qword %s, rax\n", loc);
                 else
-                    sprintf(store, "    cvtsi2ss %s, eax\n", reg);
-            } else
-                sprintf(store, "    mov %s, rax\n", reg);
+                    sprintf(store, "    mov %s, rax\n", loc);
+            }
+
+            code = realloc(code, (strlen(code) + strlen(store) + 1) * sizeof(char));
+            strcat(code, store);
+            free(store);
+            break;
+        }
+        case AST_MATH: {
+            code = emit_ast(ast);
+            char *store = calloc(strlen(loc) + 128, sizeof(char));
+
+            if (strcmp(param_type, "char") == 0 || strcmp(param_type, "int") == 0) {
+                if (float_math_result) {
+                    if (on_stack)
+                        sprintf(store, "    cvttss2si eax, xmm0\n"
+                                       "    mov dword %s, eax\n", loc);
+                    else
+                        sprintf(store, "    cvttss2si %s, xmm0\n", loc);
+                } else {
+                    if (on_stack)
+                        sprintf(store, "    mov dword %s, eax\n", loc);
+                    else
+                        sprintf(store, "    mov %s, eax\n", loc);
+                }
+            } else {
+                if (float_math_result) {
+                    if (on_stack)
+                        sprintf(store, "    movss dword %s, xmm0\n", loc);
+                    else
+                        sprintf(store, "    movss %s, xmm0\n", loc);
+                } else {
+                    if (on_stack)
+                        sprintf(store, "    cvtsi2ss xmm0, eax\n"
+                                       "    movss dword %s, xmm0\n", loc);
+                    else
+                        sprintf(store, "    cvtsi2ss %s, eax\n", loc);
+                }
+            }
 
             code = realloc(code, (strlen(code) + strlen(store) + 1) * sizeof(char));
             strcat(code, store);
@@ -295,23 +414,41 @@ char *emit_math(AST *ast);
 char *emit_call(AST *ast) {
     char *code = calloc(1, sizeof(char));
     char *next;
-    char *reg;
+    char *loc;
     AST *sym = sym_find(AST_FUNC, "<global>", ast->call.name);
     AST *param;
     AST *arg;
     size_t ints = 0;
     size_t floats = 0;
+    size_t beg_rsp = rsp;
 
     for (size_t i = 0; i < sym->func.params_cnt; i++) {
         param = sym->func.params[i];
         arg = ast->call.args[i];
+        loc = calloc(64, sizeof(char));
 
-        if (strcmp(param->assign.type, "char") == 0 || strcmp(param->assign.type, "int") == 0)
-            reg = regs[int_params[ints++]][DWORD];
-        else if (strcmp(param->assign.type, "float") == 0)
-            reg = regs[XMM][++floats];
-        else
-            reg = regs[int_params[ints++]][QWORD];
+        if (strcmp(param->assign.type, "char") == 0 || strcmp(param->assign.type, "int") == 0) {
+            if (ints < 6)
+                strcpy(loc, regs[int_params[ints++]][DWORD]);
+            else {
+                rsp += 8;
+                sprintf(loc, "[rbp-%zu]", rsp);
+            }
+        } else if (strcmp(param->assign.type, "float") == 0)
+            if (floats < 15)
+                strcpy(loc, regs[XMM][++floats]);
+            else {
+                rsp += 8;
+                sprintf(loc, "[rbp-%zu]", rsp);
+            }
+        else {
+            if (ints < 6)
+                strcpy(loc, regs[int_params[ints++]][QWORD]);
+            else {
+                rsp += 8;
+                sprintf(loc, "[rbp-%zu]", rsp);
+            }
+        }
 
         if (arg->type == AST_CALL && i > 0) {
             char *temp;
@@ -374,7 +511,7 @@ char *emit_call(AST *ast) {
                 free(temp);
             }
 
-            next = emit_call_arg(arg, param->assign.type, reg);
+            next = emit_call_arg(arg, param->assign.type, loc, strstr(loc, "[rbp-") != NULL ? true : false);
 
             temp = calloc(strlen(store_ints) + strlen(store_floats) + strlen(next) + strlen(load_floats) + strlen(load_ints) + 128, sizeof(char));
             
@@ -406,16 +543,27 @@ char *emit_call(AST *ast) {
             continue;
         }
         
-        next = emit_call_arg(arg, param->assign.type, reg);
+        next = emit_call_arg(arg, param->assign.type, loc, strstr(loc, "[rbp-") != NULL ? true : false);
         code = realloc(code, (strlen(code) + strlen(next) + 1) * sizeof(char));
         strcat(code, next);
         free(next);
+        free(loc);
     }
-
     code = realloc(code, (strlen(code) + strlen(ast->call.name) + 32) * sizeof(char));
     strcat(code, "    call ");
     strcat(code, ast->call.name);
     strcat(code, "_\n");
+
+    if (rsp != beg_rsp) {
+        char *temp = calloc(strlen(code) + 128, sizeof(char));
+        sprintf(temp, "    sub rsp, %zu\n"
+                      "%s"
+                      "    add rsp, %zu\n", rsp - beg_rsp, code, rsp - beg_rsp);
+        free(code);
+        code = temp;
+        rsp = beg_rsp;
+    }
+
     return code;
 }
 
@@ -625,7 +773,7 @@ char *emit_ret(AST *ast) {
                 if (strcmp(var->assign.type, "char") == 0)
                     sprintf(code, "    movsx eax, byte %s\n", var->assign.rbp);
                 else if (strcmp(var->assign.type, "int") == 0)
-                    sprintf(code, "    mov eaX, dword %s\n", var->assign.rbp);
+                    sprintf(code, "    mov eax, dword %s\n", var->assign.rbp);
                 else
                     sprintf(code, "    cvttss2si eax, dword %s\n", var->assign.rbp);
             } else if (strcmp(type, "float") == 0) {
