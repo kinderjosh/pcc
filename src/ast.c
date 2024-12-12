@@ -15,7 +15,8 @@ const char *ast_types[] = {
     [AST_RET] = "return",
     [AST_MATH] = "math expression",
     [AST_OPER] = "operator",
-    [AST_MATH_VAR] = "math var"
+    [AST_MATH_VAR] = "math var",
+    [AST_IF_ELSE] = "condition"
 };
 
 AST *ast_init(ASTType type, char *scope_def, char *func_def, size_t ln, size_t col) {
@@ -83,6 +84,21 @@ void ast_fields_del(AST *ast) {
         case AST_MATH_VAR:
             if (ast->math_var.stack_rbp != NULL)
                 free(ast->math_var.stack_rbp);
+            break;
+        case AST_IF_ELSE:
+            for (size_t i = 0; i < ast->if_else.exprs_cnt; i++)
+                ast_del(ast->if_else.exprs[i]);
+            free(ast->if_else.exprs);
+
+            for (size_t i = 0; i < ast->if_else.body_cnt; i++)
+                ast_del(ast->if_else.body[i]);
+            free(ast->if_else.body);
+
+            if (ast->if_else.else_body != NULL) {
+                for (size_t i = 0; i < ast->if_else.else_body_cnt; i++)
+                    ast_del(ast->if_else.else_body[i]);
+                free(ast->if_else.else_body);
+            }
             break;
         default: break;
     }

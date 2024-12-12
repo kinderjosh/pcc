@@ -16,7 +16,8 @@ typedef enum {
     AST_RET,
     AST_MATH,
     AST_OPER,
-    AST_MATH_VAR
+    AST_MATH_VAR,
+    AST_IF_ELSE
 } ASTType;
 
 typedef struct AST AST;
@@ -84,6 +85,15 @@ typedef struct AST {
             char *reg_name;
             bool is_float;
         } math_var;
+
+        struct {
+            AST **exprs;
+            AST **body;
+            AST **else_body;
+            size_t exprs_cnt;
+            size_t body_cnt;
+            size_t else_body_cnt;
+        } if_else;
     };
 } AST;
 

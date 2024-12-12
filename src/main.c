@@ -22,25 +22,25 @@ int main(int argc, char **argv) {
 
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--help") == 0) {
-            printf("Usage: %s [options...] <input file>\n"
-                   "Options:\n"
-                   "  -c                   Output only object files.\n"
-                   "  -o <output file>     Place the output into <output file>.\n"
-                   "  -t <test directory>  (Development only) Test each file in <test directory>.\n"
-                   "  -S                   Output only assembly files.\n", argv[0]);
+            printf("usage: %s [options...] <input file>\n"
+                   "options:\n"
+                   "  -c                   output only object files\n"
+                   "  -o <output file>     place the output into <output file>\n"
+                   "  -t <test directory>  (development only) test each file in <test directory>\n"
+                   "  -S                   output only assembly files\n", argv[0]);
             return EXIT_SUCCESS;
         } else if (strcmp(argv[i], "-c") == 0)
             link = false;
         else if (strcmp(argv[i], "-o") == 0) {
             if (i == argc - 1) {
-                fprintf(stderr, "pcc: Error: Missing argument <output file> to option '-o'.\n");
+                fprintf(stderr, "pcc: error: missing argument <output file> to option '-o'\n");
                 return EXIT_FAILURE;
             }
 
             out = argv[++i];
         } else if (strcmp(argv[i], "-t") == 0) {
             if (i == argc - 1) {
-                fprintf(stderr, "pcc: Error: Missing argument <test directory> to option '-t'.\n");
+                fprintf(stderr, "pcc: error: missing argument <test directory> to option '-t'\n");
                 return EXIT_FAILURE;
             }
 
@@ -50,13 +50,13 @@ int main(int argc, char **argv) {
         else if (i == argc - 1 && test_dir == NULL)
             file = argv[i];
         else {
-            fprintf(stderr, "pcc: Error: Unknown argument '%s'.\n", argv[i]);
+            fprintf(stderr, "pcc: error: unknown argument '%s'\n", argv[i]);
             return EXIT_FAILURE;
         }
     }
 
     if (file == NULL && test_dir == NULL) {
-        fprintf(stderr, "pcc: Error: Missing argument <input file>.\n");
+        fprintf(stderr, "pcc: error: missing argument <input file>\n");
         return EXIT_FAILURE;
     } else if (test_dir != NULL) {
         if (test_dir[strlen(test_dir) - 1] == '/')
@@ -64,7 +64,7 @@ int main(int argc, char **argv) {
 
         DIR *dr = opendir(test_dir);
         if (dr == NULL) {
-            fprintf(stderr, "pcc: Error: Failed to open test directory '%s'.\n", test_dir);
+            fprintf(stderr, "pcc: error: failed to open test directory '%s'\n", test_dir);
             return EXIT_FAILURE;
         }
 
@@ -78,9 +78,9 @@ int main(int argc, char **argv) {
             path = realloc(path, (strlen(test_dir) + strlen(de->d_name) + 2) * sizeof(char));
             sprintf(path, "%s/%s", test_dir, de->d_name);
 
-            printf("Testing '%s'...\n", path);
+            printf("testing '%s'...\n", path);
             test(path);
-            printf("Test passed.\n");
+            printf("test passed\n");
         }
 
         free(path);
@@ -122,7 +122,7 @@ int main(int argc, char **argv) {
 
     FILE *f = fopen(outasm, "w");
     if (f == NULL) {
-        fprintf(stderr, "%s: Error: Failed to write to file '%s'.\n", file, outasm);
+        fprintf(stderr, "%s: error: failed to write to file '%s'\n", file, outasm);
         return EXIT_FAILURE;
     }
 
@@ -140,7 +140,7 @@ int main(int argc, char **argv) {
     sprintf(nasm, "nasm -felf64 %s -o %s.o && rm %s", outasm, outbase, outasm);
 
     if (system(nasm) != 0) {
-        fprintf(stderr, "%s: Error: Failed to assemble.\n", file);
+        fprintf(stderr, "%s: error: failed to assemble\n", file);
         exit(EXIT_FAILURE);
     }
 
@@ -155,7 +155,7 @@ int main(int argc, char **argv) {
     sprintf(nasm, "ld -emain_ %s.o -o %s && rm %s.o", outbase, out, outbase);
 
     if (system(nasm) != 0) {
-        fprintf(stderr, "%s: Error: Failed to link.\n", file);
+        fprintf(stderr, "%s: error: failed to link\n", file);
         exit(EXIT_FAILURE);
     }
 

@@ -16,12 +16,56 @@ extern const char *ast_types[];
 AST **sym_tab;
 size_t sym_cnt = 0;
 
+/* Too lazy to explain this
+ * Example:
+ *
+ * main
+ * main-if:2:4
+ * main-if:2:4-if:3:8
+ * 
+ * Check if scopes have common sections like above
+ */
+bool is_in_scope(char *haystack, char *needle) {
+    if (strcmp(haystack, needle) == 0 || strcmp(haystack, "<global>") == 0 || strcmp(needle, "<global>") == 0)
+        return true;
+
+    char *haystack_cpy = strdup(haystack);
+    char *needle_cpy = strdup(needle);
+
+    char *haystack_rest = haystack_cpy;
+    char *needle_rest = needle_cpy;
+
+    char *haystack_tok;
+    char *needle_tok;
+
+    bool found = false;
+    
+    do {
+        haystack_tok = strtok_r(haystack_rest, "-", &haystack_rest);
+        if (haystack_tok == NULL) {
+            found = true;
+            break;
+        }
+
+        needle_tok = strtok_r(needle_rest, "-", &needle_rest);
+        if (needle_tok == NULL)
+            break;
+
+        if (strcmp(haystack_tok, needle_tok) != 0)
+            break;
+    } while (haystack_tok != NULL);
+
+    free(haystack_cpy);
+    free(needle_cpy);
+    return found;
+}
+
 AST *sym_find(ASTType type, char *scope, char *name) {
     AST *sym;
     for (size_t i = 0; i < sym_cnt; i++) {
         sym = sym_tab[i];
 
-        if (sym->type != type || (strcmp(sym->scope_def, scope) != 0 && strcmp(sym->scope_def, "<global>") != 0 && strcmp(scope, "<global>") != 0))
+        if (sym->type != type || !is_in_scope(sym->scope_def, scope))
             continue;
         else if ((type == AST_FUNC && strcmp(sym->func.name, name) == 0) || (type == AST_ASSIGN && strcmp(sym->assign.name, name) == 0))
             return sym;
@@ -111,7 +155,7 @@ void prs_del(Prs *prs) {
 
 TokType prs_eat(Prs *prs, TokType type) {
     if (type != prs->tok->type) {
-        fprintf(stderr, "%s:%zu:%zu: Error: Expected '%s' but found '%s'.\n", prs->file, prs->tok->ln, prs->tok->col, tok_types[type], tok_types[prs->tok->type]);
+        fprintf(stderr, "%s:%zu:%zu: error: expected '%s' but found '%s'\n", prs->file, prs->tok->ln, prs->tok->col, tok_types[type], tok_types[prs->tok->type]);
         exit(EXIT_FAILURE);
     }
 
@@ -127,9 +171,13 @@ AST **prs_body(Prs *prs, size_t *cnt, bool allow_no_braces) {
     AST **body = calloc(1, sizeof(AST *));
     size_t body_cnt = 0;
     AST *stmt;
+    bool ate_first = false;
 
-    if (!allow_no_braces)
+    if (!allow_no_braces || prs->tok->type == TOK_LBRACE) {
         prs_eat(prs, TOK_LBRACE);
+        ate_first = true;
+        allow_no_braces = false;
+    }
 
     while (prs->tok->type != TOK_RBRACE && prs->tok->type != TOK_EOF) {
         stmt = prs_stmt(prs);
@@ -139,8 +187,9 @@ AST **prs_body(Prs *prs, size_t *cnt, bool allow_no_braces) {
             case AST_RET:
                 prs_eat(prs, TOK_SEMI);
                 break;
+            case AST_IF_ELSE: break;
             default:
-                fprintf(stderr, "%s:%zu:%zu: Error: Invalid statement '%s' in function '%s'.\n", prs->file, stmt->ln, stmt->col, ast_types[stmt->type], prs->cur_func);
+                fprintf(stderr, "%s:%zu:%zu: error: invalid statement '%s' in function '%s'\n", prs->file, stmt->ln, stmt->col, ast_types[stmt->type], prs->cur_func);
                 exit(EXIT_FAILURE);
         }
 
@@ -151,7 +200,7 @@ AST **prs_body(Prs *prs, size_t *cnt, bool allow_no_braces) {
             break;
     }
 
-    if (!allow_no_braces)
+    if (!allow_no_braces || (prs->tok->type == TOK_RBRACE && ate_first))
         prs_eat(prs, TOK_RBRACE);
 
     *cnt = body_cnt;
@@ -195,7 +244,7 @@ AST *prs_math(Prs *prs, AST *first) {
     prs->in_math = false;
 
     if (is_float && contains_mod) {
-        fprintf(stderr, "%s:%zu:%zu: Error: Modulus operator used where a float result may occur; consider using casts.\n", prs->file, first->ln, first->col);
+        fprintf(stderr, "%s:%zu:%zu: error: modulus operator used where a float result may occur; consider using casts\n", prs->file, first->ln, first->col);
         exit(EXIT_FAILURE);
     }
 
@@ -306,14 +355,14 @@ AST *prs_value(Prs *prs, char *type) {
         case AST_CALL: {
             AST *sym = sym_find(AST_FUNC, "<global>", value->call.name);
             if (strcmp(sym->func.type, "void") == 0) {
-                fprintf(stderr, "%s:%zu:%zu: Error: Function '%s' doesn't return a value.\n", prs->file, value->ln, value->col, value->call.name);
+                fprintf(stderr, "%s:%zu:%zu: error: function '%s' doesn't return a value\n", prs->file, value->ln, value->col, value->call.name);
                 exit(EXIT_FAILURE);
             }
             break;
         }
         case AST_MATH: break;
         default:
-            fprintf(stderr, "%s:%zu:%zu: Error: Invalid value '%s'.\n", prs->file, value->ln, value->col, ast_types[value->type]);
+            fprintf(stderr, "%s:%zu:%zu: error: invalid value '%s'\n", prs->file, value->ln, value->col, ast_types[value->type]);
             exit(EXIT_FAILURE);
     }
 
@@ -327,12 +376,12 @@ check_math:
 AST *prs_id_func(Prs *prs, char *name, char *type, size_t ln, size_t col) {
     AST *sym = sym_find(AST_FUNC, "<global>", name);
     if (sym != NULL) {
-        fprintf(stderr, "%s:%zu:%zu: Error: Redefinition of function '%s'; first defined at %zu:%zu.\n", prs->file, ln, col, name, sym->ln, sym->col);
+        fprintf(stderr, "%s:%zu:%zu: error: redefinition of function '%s'; first defined at %zu:%zu\n", prs->file, ln, col, name, sym->ln, sym->col);
         exit(EXIT_FAILURE);
     }
 
     if (strcmp(name, "main") == 0 && strcmp(type, "void") != 0) {
-        fprintf(stderr, "%s:%zu:%zu: Error: Entrypoint 'main' must have type 'void'.\n", prs->file, ln, col);
+        fprintf(stderr, "%s:%zu:%zu: error: entrypoint 'main' must have type 'void'\n", prs->file, ln, col);
         exit(EXIT_FAILURE);
     }
 
@@ -352,10 +401,10 @@ AST *prs_id_func(Prs *prs, char *name, char *type, size_t ln, size_t col) {
 
         param = prs_stmt(prs);
         if (param->type != AST_ASSIGN) {
-            fprintf(stderr, "%s:%zu:%zu: Error: Expected parameter definition but found '%s'.\n", prs->file, param->ln, param->col, ast_types[param->type]);
+            fprintf(stderr, "%s:%zu:%zu: error: expected parameter definition but found '%s'\n", prs->file, param->ln, param->col, ast_types[param->type]);
             exit(EXIT_FAILURE);
         } else if (param->assign.value != NULL) {
-            fprintf(stderr, "%s:%zu:%zu: Error: Assigning parameter '%s' outside of function body.\n", prs->file, param->ln, param->col, param->assign.name);
+            fprintf(stderr, "%s:%zu:%zu: error: assigning parameter '%s' outside of function body\n", prs->file, param->ln, param->col, param->assign.name);
             exit(EXIT_FAILURE);
         }
 
@@ -380,7 +429,7 @@ AST *prs_id_func(Prs *prs, char *name, char *type, size_t ln, size_t col) {
         ret = body[body_cnt - 1];
 
     if (strcmp(type, "void") != 0 && ret == NULL) {
-        fprintf(stderr, "%s:%zu:%zu: Error: Missing return statement in function '%s' of type '%s'.\n", prs->file, ln, col, name, type);
+        fprintf(stderr, "%s:%zu:%zu: error: missing return statement in function '%s' of type '%s'\n", prs->file, ln, col, name, type);
         exit(EXIT_FAILURE);
     }
 
@@ -399,7 +448,7 @@ AST *prs_id_func(Prs *prs, char *name, char *type, size_t ln, size_t col) {
 AST *prs_id_assign(Prs *prs, char *name, char *type, size_t ln, size_t col) {
     AST *sym = sym_find(AST_ASSIGN, prs->cur_scope, name);
     if (type != NULL && sym != NULL) {
-        fprintf(stderr, "%s:%zu:%zu: Error: Redefinition of variable '%s'; first defined at %zu:%zu.\n", prs->file, ln, col, name, sym->ln, sym->col);
+        fprintf(stderr, "%s:%zu:%zu: error: redefinition of variable '%s'; first defined at %zu:%zu\n", prs->file, ln, col, name, sym->ln, sym->col);
         exit(EXIT_FAILURE);
     }
 
@@ -423,15 +472,15 @@ AST *prs_id_assign(Prs *prs, char *name, char *type, size_t ln, size_t col) {
 AST *prs_id_ret(Prs *prs, size_t ln, size_t col) {
     AST *sym = sym_find(AST_FUNC, "<global>", prs->cur_func);
     if (sym == NULL) {
-        fprintf(stderr, "%s:%zu:%zu: Error: Invalid statement 'Return' outside of a function.\n", prs->file, ln, col);
+        fprintf(stderr, "%s:%zu:%zu: error: invalid statement 'Return' outside of a function\n", prs->file, ln, col);
         exit(EXIT_FAILURE);
     }
 
     if (strcmp(sym->func.type, "void") == 0 && prs->tok->type != TOK_SEMI) {
-        fprintf(stderr, "%s:%zu:%zu: Error: Unexpected return value in function '%s' of type 'void'.\n", prs->file, prs->tok->ln, prs->tok->col, prs->cur_func);
+        fprintf(stderr, "%s:%zu:%zu: error: unexpected return value in function '%s' of type 'void'\n", prs->file, prs->tok->ln, prs->tok->col, prs->cur_func);
         exit(EXIT_FAILURE);
     } else if (strcmp(sym->func.type, "void") != 0 && prs->tok->type == TOK_SEMI) {
-        fprintf(stderr, "%s:%zu:%zu: Error: Missing return value in function '%s' of type '%s'.\n", prs->file, prs->tok->ln, prs->tok->col, prs->cur_func, sym->func.type);
+        fprintf(stderr, "%s:%zu:%zu: error: missing return value in function '%s' of type '%s'\n", prs->file, prs->tok->ln, prs->tok->col, prs->cur_func, sym->func.type);
         exit(EXIT_FAILURE);
     }
 
@@ -443,7 +492,7 @@ AST *prs_id_ret(Prs *prs, size_t ln, size_t col) {
 AST *prs_id_call(Prs *prs, char *name, size_t ln, size_t col) {
     AST *sym = sym_find(AST_FUNC, "<global>", name);
     if (sym == NULL) {
-        fprintf(stderr, "%s:%zu:%zu: Error: Undefined function '%s'.\n", prs->file, ln, col, name);
+        fprintf(stderr, "%s:%zu:%zu: error: undefined function '%s'\n", prs->file, ln, col, name);
         exit(EXIT_FAILURE);
     }
 
@@ -454,7 +503,7 @@ AST *prs_id_call(Prs *prs, char *name, size_t ln, size_t col) {
 
     while (prs->tok->type != TOK_RPAREN && prs->tok->type != TOK_EOF) {
         if (args_cnt == sym->func.params_cnt) {
-            fprintf(stderr, "%s:%zu:%zu: Error: Excessive arguments in call to function '%s'; expected %zu but found %zu.\n", prs->file, ln, col, name, sym->func.params_cnt, args_cnt);
+            fprintf(stderr, "%s:%zu:%zu: error: excessive arguments in call to function '%s'; expected %zu but found %zu\n", prs->file, ln, col, name, sym->func.params_cnt, args_cnt);
             exit(EXIT_FAILURE);
         } else if (args_cnt > 0)
             prs_eat(prs, TOK_COMMA);
@@ -467,7 +516,7 @@ AST *prs_id_call(Prs *prs, char *name, size_t ln, size_t col) {
     prs_eat(prs, TOK_RPAREN);
 
     if (args_cnt < sym->func.params_cnt) {
-        fprintf(stderr, "%s:%zu:%zu: Error: Missing arguments in call to function '%s'; expected %zu but found %zu.\n", prs->file, ln, col, name, sym->func.params_cnt, args_cnt);
+        fprintf(stderr, "%s:%zu:%zu: error: missing arguments in call to function '%s'; expected %zu but found %zu\n", prs->file, ln, col, name, sym->func.params_cnt, args_cnt);
         exit(EXIT_FAILURE);
     }
 
@@ -475,6 +524,114 @@ AST *prs_id_call(Prs *prs, char *name, size_t ln, size_t col) {
     ast->call.name = name;
     ast->call.args = args;
     ast->call.args_cnt = args_cnt;
+    return ast;
+}
+
+AST **prs_cond(Prs *prs, size_t *cnt) {
+    AST **exprs = calloc(1, sizeof(AST *));
+    size_t exprs_cnt = 0;
+    AST *oper;
+    AST *left;
+    AST *right;
+    prs_eat(prs, TOK_LPAREN);
+
+    while (prs->tok->type != TOK_RPAREN && prs->tok->type != TOK_EOF) {
+        if (exprs_cnt > 0 && (prs->tok->type == TOK_AND || prs->tok->type == TOK_OR)) {
+            oper = ast_init(AST_OPER, prs->cur_scope, prs->cur_func, prs->tok->ln, prs->tok->col);
+            oper->oper.kind = prs_eat(prs, prs->tok->type);
+            exprs = realloc(exprs, (exprs_cnt + 1) * sizeof(AST *));
+            exprs[exprs_cnt++] = oper;
+        }
+
+        left = prs_value(prs, NULL);
+
+        if (prs->tok->type != TOK_LT && prs->tok->type != TOK_LTE && prs->tok->type != TOK_GT && prs->tok->type != TOK_GTE && prs->tok->type != TOK_NOT_EQ && prs->tok->type != TOK_EQ_EQ) {
+            fprintf(stderr, "%s:%zu:%zu: error: invalid logical operator '%s'\n", prs->file, prs->tok->ln, prs->tok->col, tok_types[prs->tok->type]);
+            exit(EXIT_FAILURE);
+        }
+
+        oper = ast_init(AST_OPER, prs->cur_scope, prs->cur_func, prs->tok->ln, prs->tok->col);
+        oper->oper.kind = prs_eat(prs, prs->tok->type);
+
+        right = prs_value(prs, NULL);
+
+        exprs = realloc(exprs, (exprs_cnt + 3) * sizeof(AST *));
+        exprs[exprs_cnt++] = left;
+        exprs[exprs_cnt++] = oper;
+        exprs[exprs_cnt++] = right;
+    }
+
+    prs_eat(prs, TOK_RPAREN);
+    *cnt = exprs_cnt;
+    return exprs;
+}
+
+AST *prs_id_if(Prs *prs, size_t ln, size_t col) {
+    AST *ast = ast_init(AST_IF_ELSE, prs->cur_scope, prs->cur_func, ln, col);
+    ast->if_else.exprs = prs_cond(prs, &ast->if_else.exprs_cnt);
+
+    char *old_scope = strdup(prs->cur_scope);
+    prs->cur_scope = realloc(prs->cur_scope, (strlen(prs->cur_scope) + 64) * sizeof(char));
+    sprintf(prs->cur_scope, "%s-if:%zu:%zu", old_scope, prs->tok->ln, prs->tok->col);
+
+    ast->if_else.body = prs_body(prs, &ast->if_else.body_cnt, true);
+
+    if (strcmp(prs->tok->value, "else") == 0) {
+        prs_eat(prs, TOK_ID);
+        sprintf(prs->cur_scope, "%s-else:%zu:%zu", old_scope, prs->tok->ln, prs->tok->col);
+        ast->if_else.else_body = prs_body(prs, &ast->if_else.else_body_cnt, true);
+    } else
+        ast->if_else.else_body = NULL;
+
+    prs->cur_scope = realloc(prs->cur_scope, (strlen(old_scope) + 1) * sizeof(char));
+    strcpy(prs->cur_scope, old_scope);
+    free(old_scope);
+    return ast;
+}
+
+AST *prs_id_quick_math(Prs *prs, char *name, size_t ln, size_t col) {
+    AST *sym = sym_find(AST_ASSIGN, prs->cur_scope, name);
+    if (sym == NULL) {
+        fprintf(stderr, "%s:%zu:%zu: Error: Undefined variable '%s'\n", prs->file, ln, col, name);
+        exit(EXIT_FAILURE);
+    }
+
+    AST **expr = calloc(3, sizeof(AST *));
+    expr[0] = ast_init(AST_VAR, prs->cur_scope, prs->cur_func, ln, col);
+    expr[0]->var.name = strdup(name);
+    expr[1] = ast_init(AST_OPER, prs->cur_scope, prs->cur_func, ln, col);
+
+    TokType type;
+    if (prs->tok->type == TOK_PLUS_EQ)
+        type = TOK_PLUS;
+    else if (prs->tok->type == TOK_MINUS_EQ)
+        type = TOK_MINUS;
+    else if (prs->tok->type == TOK_STAR_EQ)
+        type = TOK_STAR;
+    else if (prs->tok->type == TOK_SLASH_EQ)
+        type = TOK_SLASH;
+    else {
+        if (strcmp(sym->assign.type, "float") == 0) {
+            fprintf(stderr, "%s:%zu:%zu: error: modulus operator used where a float result may occur; consider using casts\n", prs->file, ln, col);
+            exit(EXIT_FAILURE);
+        }
+
+        type = TOK_PERCENT;
+    }
+
+    expr[1]->oper.kind = type;
+    prs_eat(prs, prs->tok->type);
+    expr[2] = prs_value(prs, sym->assign.type);
+
+    AST *value = ast_init(AST_MATH, prs->cur_scope, prs->cur_func, ln, col);
+    value->math.expr = expr;
+    value->math.expr_cnt = 3;
+
+    AST *ast = ast_init(AST_ASSIGN, prs->cur_scope, prs->cur_func, ln, col);
+    ast->assign.name = name;
+    ast->assign.type = NULL;
+    ast->assign.rbp = NULL;
+    ast->assign.value = value;
     return ast;
 }
 
@@ -496,17 +653,22 @@ AST *prs_id(Prs *prs) {
     } else if (strcmp(id, "return") == 0) {
         free(id);
         return prs_id_ret(prs, ln, col);
+    } else if (strcmp(id, "if") == 0) {
+        free(id);
+        return prs_id_if(prs, ln, col);
     } else if (prs->tok->type == TOK_EQUAL)
         return prs_id_assign(prs, id, NULL, ln, col);
     else if (prs->tok->type == TOK_LPAREN)
         return prs_id_call(prs, id, ln, col);
+    else if (prs->tok->type == TOK_PLUS_EQ || prs->tok->type == TOK_MINUS_EQ || prs->tok->type == TOK_STAR_EQ || prs->tok->type == TOK_SLASH_EQ || prs->tok->type == TOK_PERCENT_EQ)
+        return prs_id_quick_math(prs, id, ln, col);
     else if (sym_find(AST_ASSIGN, prs->cur_scope, id) != NULL) {
         AST *ast = ast_init(AST_VAR, prs->cur_scope, prs->cur_func, ln, col);
         ast->var.name = id;
         return ast;
     }
 
-    fprintf(stderr, "%s:%zu:%zu: Error: Unknown identifier '%s'.\n", prs->file, ln, col, id);
+    fprintf(stderr, "%s:%zu:%zu: error: unknown identifier '%s'\n", prs->file, ln, col, id);
     exit(EXIT_FAILURE);
 }
 
@@ -516,7 +678,7 @@ AST *prs_data(Prs *prs) {
     ast->data.digit = strtold(prs->tok->value, &endptr);
 
     if (endptr == prs->tok->value || errno == ERANGE) {
-        fprintf(stderr, "%s:%zu:%zu: Error: Digit conversion failed: %s.\n", prs->file, prs->tok->ln, prs->tok->col, strerror(errno));
+        fprintf(stderr, "%s:%zu:%zu: error: digit conversion failed: %s\n", prs->file, prs->tok->ln, prs->tok->col, strerror(errno));
         exit(EXIT_FAILURE);
     }
 
@@ -530,7 +692,7 @@ AST *prs_stmt(Prs *prs) {
         case TOK_INT:
         case TOK_FLOAT: return prs_data(prs);
         default:
-            fprintf(stderr, "%s:%zu:%zu: Error: Invalid statement '%s'.\n", prs->file, prs->tok->ln, prs->tok->col, tok_types[prs->tok->type]);
+            fprintf(stderr, "%s:%zu:%zu: error: invalid statement '%s'\n", prs->file, prs->tok->ln, prs->tok->col, tok_types[prs->tok->type]);
             exit(EXIT_FAILURE);
     }
 }
@@ -546,11 +708,11 @@ AST *prs_file(char *file) {
     while (prs->tok->type != TOK_EOF) {
         stmt = prs_stmt(prs);
         if (stmt->type != AST_FUNC && stmt->type != AST_ASSIGN) {
-            fprintf(stderr, "%s:%zu:%zu: Error: Invalid statement '%s' outside of a function.\n", prs->file, stmt->ln, stmt->col, ast_types[stmt->type]);
+            fprintf(stderr, "%s:%zu:%zu: error: invalid statement '%s' outside of a function\n", prs->file, stmt->ln, stmt->col, ast_types[stmt->type]);
             exit(EXIT_FAILURE);
         } else if (stmt->type == AST_ASSIGN) {
             if (stmt->assign.type == NULL) {
-                fprintf(stderr, "%s:%zu:%zu: Error: Assigning variable '%s' outside of a function.\n", prs->file, stmt->ln, stmt->col, stmt->assign.name);
+                fprintf(stderr, "%s:%zu:%zu: error: assigning variable '%s' outside of a function\n", prs->file, stmt->ln, stmt->col, stmt->assign.name);
                 exit(EXIT_FAILURE);
             }
 
@@ -562,7 +724,7 @@ AST *prs_file(char *file) {
     }
 
     if (sym_find(AST_FUNC, "<global>", "main") == NULL) {
-        fprintf(stderr, "%s: Error: Missing entrypoint 'main'.\n", prs->file);
+        fprintf(stderr, "%s: error: missing entrypoint 'main'\n", prs->file);
         exit(EXIT_FAILURE);
     }
 

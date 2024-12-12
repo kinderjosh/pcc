@@ -9,7 +9,7 @@
 Lex *lex_init(char *file) {
     FILE *f = fopen(file, "r");
     if (f == NULL) {
-        fprintf(stderr, "%s: Error: No such file exists.\n", file);
+        fprintf(stderr, "%s: error: no such file exists\n", file);
         exit(EXIT_FAILURE);
     }
 
@@ -143,7 +143,7 @@ Tok *lex_next(Lex *lex) {
                     sprintf(value, "%d", (int)lex->ch);
                     break;
                 default:
-                    fprintf(stderr, "%s:%zu:%zu: Error: Unsupported escape sequence '\\%c'.\n", lex->file, lex->ln, col, lex->ch);
+                    fprintf(stderr, "%s:%zu:%zu: error: unsupported escape sequence '\\%c'\n", lex->file, lex->ln, col, lex->ch);
                     exit(EXIT_FAILURE);
             }
         } else
@@ -152,7 +152,7 @@ Tok *lex_next(Lex *lex) {
         lex_step(lex);
 
         if (lex->ch != '\'') {
-            fprintf(stderr, "%s:%zu:%zu: Error: Unclosed character constant.\n", lex->file, lex->ln, col);
+            fprintf(stderr, "%s:%zu:%zu: error: unclosed character constant\n", lex->file, lex->ln, col);
             exit(EXIT_FAILURE);
         }
 
@@ -167,16 +167,54 @@ Tok *lex_next(Lex *lex) {
         case '}': return lex_step_with(lex, TOK_RBRACE, "}");
         case ';': return lex_step_with(lex, TOK_SEMI, ";");
         case ',': return lex_step_with(lex, TOK_COMMA, ",");
-        case '=': return lex_step_with(lex, TOK_EQUAL, "=");
-        case '+': return lex_step_with(lex, TOK_PLUS, "+");
-        case '-': return lex_step_with(lex, TOK_MINUS, "-");
-        case '*': return lex_step_with(lex, TOK_STAR, "*");
-        case '/': return lex_step_with(lex, TOK_SLASH, "/");
-        case '%': return lex_step_with(lex, TOK_PERCENT, "%%");
+        case '=':
+            if (lex_peek(lex, 1) == '=')
+                return lex_step_with(lex, TOK_EQ_EQ, "==");
+            return lex_step_with(lex, TOK_EQUAL, "=");
+        case '+':
+            if (lex_peek(lex, 1) == '=')
+                return lex_step_with(lex, TOK_PLUS_EQ, "+=");
+            return lex_step_with(lex, TOK_PLUS, "+");
+        case '-':
+            if (lex_peek(lex, 1) == '=')
+                return lex_step_with(lex, TOK_MINUS_EQ, "-=");
+            return lex_step_with(lex, TOK_MINUS, "-");
+        case '*':
+            if (lex_peek(lex, 1) == '=')
+                return lex_step_with(lex, TOK_STAR_EQ, "*=");
+            return lex_step_with(lex, TOK_STAR, "*");
+        case '/':
+            if (lex_peek(lex, 1) == '=')
+                return lex_step_with(lex, TOK_SLASH_EQ, "/=");
+            return lex_step_with(lex, TOK_SLASH, "/");
+        case '%':
+            if (lex_peek(lex, 1) == '=')
+                return lex_step_with(lex, TOK_PERCENT_EQ, "%%=");
+            return lex_step_with(lex, TOK_PERCENT, "%%");
+        case '<':
+            if (lex_peek(lex, 1) == '=')
+                return lex_step_with(lex, TOK_LTE, "<=");
+            return lex_step_with(lex, TOK_LT, "<");
+        case '>':
+            if (lex_peek(lex, 1) == '=')
+                return lex_step_with(lex, TOK_GTE, ">=");
+            return lex_step_with(lex, TOK_GT, ">");
+        case '!':
+            if (lex_peek(lex, 1) == '=')
+                return lex_step_with(lex, TOK_NOT_EQ, "!=");
+            break;
+        case '&':
+            if (lex_peek(lex, 1) == '&')
+                return lex_step_with(lex, TOK_AND, "&&");
+            break;
+        case '|':
+            if (lex_peek(lex, 1) == '|')
+                return lex_step_with(lex, TOK_OR, "||");
+            break;
         case '\0': return tok_init(TOK_EOF, strdup("<eof>"), lex->ln, lex->col);
         default: break;
     }
 
-    fprintf(stderr, "%s:%zu:%zu: Error: Unknown character '%c'.\n", lex->file, lex->ln, lex->col, lex->ch);
+    fprintf(stderr, "%s:%zu:%zu: error: unknown character '%c'\n", lex->file, lex->ln, lex->col, lex->ch);
     exit(EXIT_FAILURE);
 }

@@ -12,13 +12,26 @@ const char *tok_types[] = {
     [TOK_LBRACE] = "left brace",
     [TOK_RBRACE] = "right brace",
     [TOK_SEMI] = "semicolon",
-    [TOK_COMMA] = "Comma",
-    [TOK_EQUAL] = "Equal",
-    [TOK_PLUS] = "Plus",
-    [TOK_MINUS] = "Minus",
-    [TOK_STAR] = "Star",
-    [TOK_SLASH] = "Slash",
-    [TOK_PERCENT] = "Percent"
+    [TOK_COMMA] = "comma",
+    [TOK_EQUAL] = "equal",
+    [TOK_PLUS] = "plus",
+    [TOK_MINUS] = "minus",
+    [TOK_STAR] = "star",
+    [TOK_SLASH] = "slash",
+    [TOK_PERCENT] = "percent",
+    [TOK_PLUS_EQ] = "plus equal",
+    [TOK_MINUS_EQ] = "minus equal",
+    [TOK_STAR_EQ] = "star equal",
+    [TOK_SLASH_EQ] = "slash equal",
+    [TOK_PERCENT_EQ] = "percent equal",
+    [TOK_LT] = "less than",
+    [TOK_LTE] = "less than or equal",
+    [TOK_GT] = "greater than",
+    [TOK_GTE] = "greater than or equal",
+    [TOK_NOT_EQ] = "not equal",
+    [TOK_EQ_EQ] = "equal equal",
+    [TOK_AND] = "and",
+    [TOK_OR] = "or"
 };
 
 Tok *tok_init(TokType type, char *value, size_t ln, size_t col) {
