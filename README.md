@@ -13,7 +13,7 @@ PCC is my own implementation of the C language. It only compiles for x86-64 Linu
 - [x] - Calls
 - [x] - Math
 - [x] - Conditions
-- [ ] - Loops
+- [x] - Loops
 - [ ] - Arrays
 - [ ] - Includes
 - [ ] - Begin standard library

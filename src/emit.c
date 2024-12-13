@@ -94,23 +94,44 @@ char *label_init() {
     return label;
 }
 
-unsigned int power_of_two(unsigned int n) {
-    return 1ULL << n;
+unsigned int power_of_two(unsigned int x) {
+    if (x == 0)
+        return -1;
+
+    int n = 0;
+    while (x > 1) {
+        x >>= 1;
+        n++;
+    }
+
+    return n;
 }
 
 bool is_power_of_two(unsigned int x) {
     return x != 0 && (x & (x - 1)) == 0;
 }
 
-char *emit_arr(AST **arr, size_t cnt) {
+char *emit_arr(AST **arr, size_t cnt, bool fix_rbp) {
     char *code = calloc(1, sizeof(char));
     char *next;
+    size_t beg_rsp = rsp;
+    size_t beg_cap = rsp_cap;
 
     for (size_t i = 0; i < cnt; i++) {
         next = emit_ast(arr[i]);
         code = realloc(code, (strlen(code) + strlen(next) + 1) * sizeof(char));
         strcat(code, next);
         free(next);
+    }
+
+    if (rsp != beg_rsp && fix_rbp) {
+        char *temp = calloc(strlen(code) + 128, sizeof(char));
+        sprintf(temp, "%s    add rsp, %zu\n", code, rsp - beg_rsp);
+        free(code);
+        code = temp;
+
+        rsp = beg_rsp;
+        rsp_cap = beg_cap;
     }
 
     return code;
@@ -219,7 +240,7 @@ char *emit_func(AST *ast) {
         params = temp;
     }
 
-    char *body = emit_arr(ast->func.body, ast->func.body_cnt);
+    char *body = emit_arr(ast->func.body, ast->func.body_cnt, false);
 
     if (ast->func.ret == NULL) {
         body = realloc(body, (strlen(body) + 64) * sizeof(char));
@@ -1071,7 +1092,7 @@ char *emit_math_expr(AST *left, AST *right, TokType type) {
             code = temp;
             break;
         }
-        default:  printf(">>>%s\n", ast_types[right->type]); assert(false);
+        default: assert(false);
     }
 
     if (setup != NULL) {
@@ -1554,7 +1575,7 @@ char *emit_if_else(AST *ast) {
     char *if_label = label_init();
     char *else_label = label_init();
     char *cond = emit_cond(ast->if_else.exprs, ast->if_else.exprs_cnt, if_label, else_label);
-    char *if_body = emit_arr(ast->if_else.body, ast->if_else.body_cnt);
+    char *if_body = emit_arr(ast->if_else.body, ast->if_else.body_cnt, true);
 
     char *code = calloc(strlen(if_label) + strlen(else_label) + strlen(cond) + strlen(if_body) + 64, sizeof(char));
     sprintf(code, "%s"
@@ -1564,7 +1585,7 @@ char *emit_if_else(AST *ast) {
 
     if (ast->if_else.else_body != NULL) {
         char *final_label = label_init();
-        char *else_body = emit_arr(ast->if_else.else_body, ast->if_else.else_body_cnt);
+        char *else_body = emit_arr(ast->if_else.else_body, ast->if_else.else_body_cnt, true);
 
         char *extra = calloc(strlen(else_label) + (strlen(final_label) * 2) + strlen(else_body) + 64, sizeof(char));
         sprintf(extra, "    jmp %s\n"
@@ -1593,6 +1614,71 @@ char *emit_if_else(AST *ast) {
     return code;
 }
 
+char *emit_while(AST *ast) {
+    char *body_label = label_init();
+    char *end_label = label_init();
+    char *cond = emit_cond(ast->while_.exprs, ast->while_.exprs_cnt, body_label, end_label);
+    char *body = emit_arr(ast->while_.body, ast->while_.body_cnt, true);
+
+    char *code;
+
+    if (ast->while_.do_first) {
+        code = calloc(strlen(body_label) + strlen(end_label)  + strlen(cond) + strlen(body) + 64, sizeof(char));
+        sprintf(code, "%s:\n"
+                      "%s"
+                      "%s"
+                      "%s:\n", body_label, body, cond, end_label);
+    } else {
+        char *cond_label = label_init();
+        code = calloc((strlen(cond_label) * 2) + strlen(body_label) + (strlen(end_label) * 2) + strlen(cond) + strlen(body) + 64, sizeof(char));
+        sprintf(code, "%s:\n"
+                      "%s"
+                      "    jmp %s\n"
+                      "%s:\n"
+                      "%s"
+                      "    jmp %s\n"
+                      "%s:\n", cond_label, cond, end_label, body_label, body, cond_label, end_label);
+        free(cond_label);
+    }
+
+    free(body_label);
+    free(end_label);
+    free(cond);
+    free(body);
+    return code;
+}
+
+char *emit_for(AST *ast) {
+    char *cond_label = label_init();
+    char *body_label = label_init();
+    char *end_label = label_init();
+
+    char *init = emit_ast(ast->for_.init);
+    char *cond = emit_cond(ast->for_.cond, ast->for_.cond_cnt, body_label, end_label);
+    char *math = emit_ast(ast->for_.math);
+    char *body = emit_arr(ast->for_.body, ast->for_.body_cnt, true);
+
+    char *code = calloc(strlen(init) + strlen(cond) + strlen(math) + strlen(body) + ((strlen(cond_label) + strlen(end_label) + strlen(cond_label)) * 2) + 64, sizeof(char));
+    sprintf(code, "%s"
+                  "%s:\n"
+                  "%s"
+                  "    jmp %s\n"
+                  "%s:\n"
+                  "%s"
+                  "%s"
+                  "    jmp %s\n"
+                  "%s:\n", init, cond_label, cond, end_label, body_label, body, math, cond_label, end_label);
+
+    free(cond_label);
+    free(body_label);
+    free(end_label);
+    free(init);
+    free(cond);
+    free(math);
+    free(body);
+    return code;
+}
+
 char *emit_ast(AST *ast) {
     switch (ast->type) {
         case AST_ROOT: return emit_root(ast);
@@ -1602,6 +1688,8 @@ char *emit_ast(AST *ast) {
         case AST_RET: return emit_ret(ast);
         case AST_MATH: return emit_math(ast);
         case AST_IF_ELSE: return emit_if_else(ast);
+        case AST_WHILE: return emit_while(ast);
+        case AST_FOR: return emit_for(ast);
         default:
             fprintf(stderr, "pcc: error: missing backend for '%s'\n", ast_types[ast->type]);
             exit(EXIT_FAILURE);

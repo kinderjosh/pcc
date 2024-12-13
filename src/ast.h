@@ -17,7 +17,9 @@ typedef enum {
     AST_MATH,
     AST_OPER,
     AST_MATH_VAR,
-    AST_IF_ELSE
+    AST_IF_ELSE,
+    AST_WHILE,
+    AST_FOR
 } ASTType;
 
 typedef struct AST AST;
@@ -94,6 +96,23 @@ typedef struct AST {
             size_t body_cnt;
             size_t else_body_cnt;
         } if_else;
+
+        struct {
+            AST **exprs;
+            AST **body;
+            size_t exprs_cnt;
+            size_t body_cnt;
+            bool do_first;
+        } while_;
+
+        struct {
+            AST *init;
+            AST **cond;
+            AST *math;
+            AST **body;
+            size_t cond_cnt;
+            size_t body_cnt;
+        } for_;
     };
 } AST;
 

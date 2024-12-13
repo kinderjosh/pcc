@@ -183,11 +183,18 @@ AST **prs_body(Prs *prs, size_t *cnt, bool allow_no_braces) {
         stmt = prs_stmt(prs);
         switch (stmt->type) {
             case AST_CALL:
+                if (strcmp(prs->cur_scope, prs->cur_func) == 0 && strcmp(prs->cur_func, stmt->call.name) == 0) {
+                    fprintf(stderr, "%s:%zu:%zu: error: call to function '%s' will result in infinite recursion\n", prs->file, stmt->ln, stmt->col, stmt->call.name);
+                    exit(EXIT_FAILURE);
+                }
+                break;
             case AST_ASSIGN:
             case AST_RET:
                 prs_eat(prs, TOK_SEMI);
                 break;
-            case AST_IF_ELSE: break;
+            case AST_IF_ELSE:
+            case AST_WHILE:
+            case AST_FOR: break;
             default:
                 fprintf(stderr, "%s:%zu:%zu: error: invalid statement '%s' in function '%s'\n", prs->file, stmt->ln, stmt->col, ast_types[stmt->type], prs->cur_func);
                 exit(EXIT_FAILURE);
@@ -527,15 +534,17 @@ AST *prs_id_call(Prs *prs, char *name, size_t ln, size_t col) {
     return ast;
 }
 
-AST **prs_cond(Prs *prs, size_t *cnt) {
+AST **prs_cond(Prs *prs, size_t *cnt, bool ignore_paren) {
     AST **exprs = calloc(1, sizeof(AST *));
     size_t exprs_cnt = 0;
     AST *oper;
     AST *left;
     AST *right;
-    prs_eat(prs, TOK_LPAREN);
 
-    while (prs->tok->type != TOK_RPAREN && prs->tok->type != TOK_EOF) {
+    if (!ignore_paren)
+        prs_eat(prs, TOK_LPAREN);
+
+    while (prs->tok->type != TOK_RPAREN && prs->tok->type != TOK_SEMI && prs->tok->type != TOK_EOF) {
         if (exprs_cnt > 0 && (prs->tok->type == TOK_AND || prs->tok->type == TOK_OR)) {
             oper = ast_init(AST_OPER, prs->cur_scope, prs->cur_func, prs->tok->ln, prs->tok->col);
             oper->oper.kind = prs_eat(prs, prs->tok->type);
@@ -561,14 +570,16 @@ AST **prs_cond(Prs *prs, size_t *cnt) {
         exprs[exprs_cnt++] = right;
     }
 
-    prs_eat(prs, TOK_RPAREN);
+    if (!ignore_paren)
+        prs_eat(prs, TOK_RPAREN);
+
     *cnt = exprs_cnt;
     return exprs;
 }
 
 AST *prs_id_if(Prs *prs, size_t ln, size_t col) {
     AST *ast = ast_init(AST_IF_ELSE, prs->cur_scope, prs->cur_func, ln, col);
-    ast->if_else.exprs = prs_cond(prs, &ast->if_else.exprs_cnt);
+    ast->if_else.exprs = prs_cond(prs, &ast->if_else.exprs_cnt, false);
 
     char *old_scope = strdup(prs->cur_scope);
     prs->cur_scope = realloc(prs->cur_scope, (strlen(prs->cur_scope) + 64) * sizeof(char));
@@ -635,6 +646,93 @@ AST *prs_id_quick_math(Prs *prs, char *name, size_t ln, size_t col) {
     return ast;
 }
 
+AST *prs_id_while(Prs *prs, char *id, size_t ln, size_t col) {
+    bool do_first = strcmp(id, "do") == 0 ? true : false;
+    free(id);
+
+    AST *ast = ast_init(AST_WHILE, prs->cur_scope, prs->cur_func, ln, col);
+    char *old_scope = strdup(prs->cur_scope);
+
+    prs->cur_scope = realloc(prs->cur_scope, (strlen(prs->cur_scope) + 64) * sizeof(char));
+    sprintf(prs->cur_scope, "%s-while:%zu:%zu", old_scope, prs->tok->ln, prs->tok->col);
+
+    AST **body;
+    size_t body_cnt;
+
+    if (do_first) {
+        body = prs_body(prs, &body_cnt, true);
+
+        if (prs->tok->type != TOK_ID) {
+            fprintf(stderr, "%s:%zu:%zu: error: expected identifier 'while' following 'do' statement but found '%s'\n", prs->file, prs->tok->ln, prs->tok->col, tok_types[prs->tok->type]);
+            exit(EXIT_FAILURE);
+        } else if (strcmp(prs->tok->value, "while") != 0) {
+            fprintf(stderr, "%s:%zu:%zu: error: expected identifier 'while' following 'do' statement but found '%s'\n", prs->file, prs->tok->ln, prs->tok->col, prs->tok->value);
+            exit(EXIT_FAILURE);
+        }
+
+        prs_eat(prs, TOK_ID);
+        ast->while_.exprs = prs_cond(prs, &ast->while_.exprs_cnt, false);
+        prs_eat(prs, TOK_SEMI);
+    } else {
+        ast->while_.exprs = prs_cond(prs, &ast->while_.exprs_cnt, false);
+        body = prs_body(prs, &body_cnt, true);
+    }
+    
+    prs->cur_scope = realloc(prs->cur_scope, (strlen(old_scope) + 1) * sizeof(char));
+    strcpy(prs->cur_scope, old_scope);
+    free(old_scope);
+
+    ast->while_.body = body;
+    ast->while_.body_cnt = body_cnt;
+    ast->while_.do_first = do_first;
+    return ast;
+}
+
+AST *prs_id_for(Prs *prs, size_t ln, size_t col) {
+    char *old_scope = strdup(prs->cur_scope);
+    prs->cur_scope = realloc(prs->cur_scope, (strlen(prs->cur_scope) + 64) * sizeof(char));
+    sprintf(prs->cur_scope, "%s-for:%zu:%zu", old_scope, prs->tok->ln, prs->tok->col);
+
+    prs_eat(prs, TOK_LPAREN);
+
+    AST *init = prs_stmt(prs);
+    if (init->type != AST_ASSIGN) {
+        fprintf(stderr, "%s:%zu:%zu: error: expected assignment in for loop but found '%s'\n", prs->file, init->ln, init->col, ast_types[init->type]);
+        exit(EXIT_FAILURE);
+    }
+
+    prs_eat(prs, TOK_SEMI);
+
+    size_t cond_cnt;
+    AST **cond = prs_cond(prs, &cond_cnt, true);
+
+    prs_eat(prs, TOK_SEMI);
+
+    AST *math = prs_stmt(prs);
+    if (math->type != AST_ASSIGN) {
+        fprintf(stderr, "%s:%zu:%zu: error: expected assignment in for loop but found '%s'\n", prs->file, math->ln, math->col, ast_types[math->type]);
+        exit(EXIT_FAILURE);
+    }
+
+    prs_eat(prs, TOK_RPAREN);
+
+    size_t body_cnt;
+    AST **body = prs_body(prs, &body_cnt, true);
+
+    prs->cur_scope = realloc(prs->cur_scope, (strlen(old_scope) + 1) * sizeof(char));
+    strcpy(prs->cur_scope, old_scope);
+    free(old_scope);
+
+    AST *ast = ast_init(AST_FOR, prs->cur_scope, prs->cur_func, ln, col);
+    ast->for_.init = init;
+    ast->for_.cond = cond;
+    ast->for_.cond_cnt = cond_cnt;
+    ast->for_.math = math;
+    ast->for_.body = body;
+    ast->for_.body_cnt = body_cnt;
+    return ast;
+}
+
 AST *prs_id(Prs *prs) {
     size_t ln = prs->tok->ln;
     size_t col = prs->tok->col;
@@ -656,6 +754,11 @@ AST *prs_id(Prs *prs) {
     } else if (strcmp(id, "if") == 0) {
         free(id);
         return prs_id_if(prs, ln, col);
+    } else if (strcmp(id, "while") == 0 || strcmp(id, "do") == 0)
+        return prs_id_while(prs, id, ln, col);
+    else if (strcmp(id, "for") == 0) {
+        free(id);
+        return prs_id_for(prs, ln, col);
     } else if (prs->tok->type == TOK_EQUAL)
         return prs_id_assign(prs, id, NULL, ln, col);
     else if (prs->tok->type == TOK_LPAREN)
