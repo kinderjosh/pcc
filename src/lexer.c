@@ -85,6 +85,12 @@ Tok *lex_next(Lex *lex) {
         lex_step(lex);
         lex_step(lex);
         return lex_next(lex);
+    } else if (lex->ch == '/' && lex_peek(lex, 1) == '/') {
+        while (lex->ch != '\0' && lex->ch != '\n')
+            lex_step(lex);
+
+        lex_step(lex);
+        return lex_next(lex);
     }
 
     char *value;
@@ -158,6 +164,28 @@ Tok *lex_next(Lex *lex) {
 
         lex_step(lex);
         return tok_init(TOK_INT, value, lex->ln, lex->col);
+    } else if (lex->ch == '"') {
+        lex_step(lex);
+        value = calloc(1, sizeof(char));
+
+        while (lex->ch != '"' && lex->ch != '\0' && lex->ch != '\n') {
+            value[len++] = lex->ch;
+            value = realloc(value, (len + 1) * sizeof(char));
+            lex_step(lex);
+        }
+
+        value[len] = '\0';
+
+        if (lex->ch != '"') {
+            fprintf(stderr, "%s:%zu:%zu: error: unclosed string literal\n", lex->file, lex->ln, lex->col - len - 1);
+            exit(EXIT_FAILURE);
+        } else if (len < 1) {
+            fprintf(stderr, "%s:%zu:%zu: error: empty string literal\n", lex->file, lex->ln, lex->col - len - 1);
+            exit(EXIT_FAILURE);
+        }
+
+        lex_step(lex);
+        return tok_init(TOK_STR, value, lex->ln, lex->col - len - 2);
     }
 
     switch (lex->ch) {
@@ -211,6 +239,8 @@ Tok *lex_next(Lex *lex) {
             if (lex_peek(lex, 1) == '|')
                 return lex_step_with(lex, TOK_OR, "||");
             break;
+        case '[': return lex_step_with(lex, TOK_LSQUARE, "[");
+        case ']': return lex_step_with(lex, TOK_RSQUARE, "]");
         case '\0': return tok_init(TOK_EOF, strdup("<eof>"), lex->ln, lex->col);
         default: break;
     }

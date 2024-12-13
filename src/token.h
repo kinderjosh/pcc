@@ -32,7 +32,10 @@ typedef enum {
     TOK_NOT_EQ,
     TOK_EQ_EQ,
     TOK_AND,
-    TOK_OR
+    TOK_OR,
+    TOK_LSQUARE,
+    TOK_RSQUARE,
+    TOK_STR,
 } TokType;
 
 typedef struct {

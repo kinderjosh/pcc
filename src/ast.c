@@ -18,7 +18,10 @@ const char *ast_types[] = {
     [AST_MATH_VAR] = "math var",
     [AST_IF_ELSE] = "condition",
     [AST_WHILE] = "while",
-    [AST_FOR] = "for"
+    [AST_FOR] = "for",
+    [AST_STR] = "string",
+    [AST_SUBSCR] = "subscript",
+    [AST_ARR_LST] = "array list"
 };
 
 AST *ast_init(ASTType type, char *scope_def, char *func_def, size_t ln, size_t col) {
@@ -122,6 +125,21 @@ void ast_fields_del(AST *ast) {
             for (size_t i = 0; i < ast->for_.body_cnt; i++)
                 ast_del(ast->for_.body[i]);
             free(ast->for_.body);
+            break;
+        case AST_STR:
+            free(ast->data.str);
+            break;
+        case AST_SUBSCR:
+            free(ast->subscr.name);
+            ast_del(ast->subscr.index);
+
+            if (ast->subscr.value != NULL)
+                ast_del(ast->subscr.value);
+            break;
+        case AST_ARR_LST:
+            for (size_t i = 0; i < ast->arr_lst.items_cnt; i++)
+                ast_del(ast->arr_lst.items[i]);
+            free(ast->arr_lst.items);
             break;
         default: break;
     }

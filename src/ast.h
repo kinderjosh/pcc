@@ -19,7 +19,10 @@ typedef enum {
     AST_MATH_VAR,
     AST_IF_ELSE,
     AST_WHILE,
-    AST_FOR
+    AST_FOR,
+    AST_STR,
+    AST_SUBSCR,
+    AST_ARR_LST
 } ASTType;
 
 typedef struct AST AST;
@@ -40,6 +43,7 @@ typedef struct AST {
 
         struct {
             long double digit;
+            char *str;
         } data;
 
         struct {
@@ -68,6 +72,7 @@ typedef struct AST {
             char *rbp;
             AST *value;
             bool mut;
+            size_t arr_cap;
         } assign;
 
         struct {
@@ -114,6 +119,17 @@ typedef struct AST {
             size_t cond_cnt;
             size_t body_cnt;
         } for_;
+
+        struct {
+            char *name;
+            AST *index;
+            AST *value;
+        } subscr;
+
+        struct {
+            AST **items;
+            size_t items_cnt;
+        } arr_lst;
     };
 } AST;
 

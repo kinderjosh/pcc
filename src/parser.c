@@ -197,7 +197,14 @@ AST **prs_body(Prs *prs, size_t *cnt, bool allow_no_braces) {
             case AST_IF_ELSE:
             case AST_WHILE:
             case AST_FOR: break;
+            case AST_SUBSCR:
+                if (stmt->subscr.value == NULL)
+                    goto prs_body_invalid_stmt;
+
+                prs_eat(prs, TOK_SEMI);
+                break;
             default:
+prs_body_invalid_stmt:
                 fprintf(stderr, "%s:%zu:%zu: error: invalid statement '%s' in function '%s'\n", prs->file, stmt->ln, stmt->col, ast_types[stmt->type], prs->cur_func);
                 exit(EXIT_FAILURE);
         }
@@ -370,6 +377,13 @@ AST *prs_value(Prs *prs, char *type) {
             break;
         }
         case AST_MATH: break;
+        case AST_STR:
+        case AST_ARR_LST:
+            if (type == NULL || strchr(type, '*') == NULL) {
+                fprintf(stderr, "%s:%zu:%zu: error: invalid value '%s'\n", prs->file, value->ln, value->col, ast_types[value->type]);
+                exit(EXIT_FAILURE);
+            }
+            break;
         default:
             fprintf(stderr, "%s:%zu:%zu: error: invalid value '%s'\n", prs->file, value->ln, value->col, ast_types[value->type]);
             exit(EXIT_FAILURE);
@@ -467,18 +481,67 @@ AST *prs_id_assign(Prs *prs, char *name, char *type, bool mut, size_t ln, size_t
     } else if (sym != NULL && type != NULL)
         mut = sym->assign.mut;
 
-
     AST *ast = ast_init(AST_ASSIGN, prs->cur_scope, prs->cur_func, ln, col);
     ast->assign.name = name;
     ast->assign.type = type;
     ast->assign.rbp = NULL;
     ast->assign.mut = mut;
 
+    size_t cap = 0;
+    AST *value = NULL;
+
     if (prs->tok->type == TOK_EQUAL) {
+prs_id_assign_value:
         prs_eat(prs, TOK_EQUAL);
-        ast->assign.value = prs_value(prs, type == NULL ? sym->assign.type : type);
-    } else
-        ast->assign.value = NULL;
+        value = prs_value(prs, type == NULL ? sym->assign.type : type);
+
+        char *check_type = type != NULL ? type : sym->assign.type;
+        size_t check_cap = type != NULL ? cap : sym->assign.arr_cap;
+
+        if (strchr(check_type, '*') != NULL && check_cap > 0) {
+            if (value->type != AST_STR && value->type != AST_ARR_LST) {
+                fprintf(stderr, "%s:%zu:%zu: error: invalid value '%s' for array of type '%s'\n", prs->file, ln, col, ast_types[value->type], type);
+                exit(EXIT_FAILURE);
+            } else if (value->type == AST_STR && strlen(value->data.str) + 1 >= check_cap) {
+                fprintf(stderr, "%s:%zu:%zu: error: value '%s' exceeds array capacity of size %zu\n", prs->file, ln, col, ast_types[value->type], check_cap);
+                exit(EXIT_FAILURE);
+            } else if (value->type == AST_ARR_LST && value->arr_lst.items_cnt > check_cap) {
+                fprintf(stderr, "%s:%zu:%zu: error: value '%s' exceeds array capacity of size %zu\n", prs->file, ln, col, ast_types[value->type], check_cap);
+                exit(EXIT_FAILURE);
+            }
+        }
+    } else if (prs->tok->type == TOK_LSQUARE) {
+        prs_eat(prs, TOK_LSQUARE);
+
+        if (prs->tok->type != TOK_INT) {
+            fprintf(stderr, "%s:%zu:%zu: error: invalid array capacity, expected an int\n", prs->file, prs->tok->ln, prs->tok->col);
+            exit(EXIT_FAILURE);
+        }
+
+        char *endptr;
+        long arr_cap = strtol(prs->tok->value, &endptr, 10);
+
+        if (endptr == prs->tok->value || errno == ERANGE) {
+            fprintf(stderr, "%s:%zu:%zu: error: digit conversion failed: %s\n", prs->file, ln, col, strerror(errno));
+            exit(EXIT_FAILURE);
+        } else if (arr_cap < 1) {
+            fprintf(stderr, "%s:%zu:%zu: error: arrays must have a size of at least 1\n", prs->file, ln, col);
+            exit(EXIT_FAILURE);
+        }
+
+        cap = (size_t)arr_cap;
+        prs_eat(prs, TOK_INT);
+        prs_eat(prs, TOK_RSQUARE);
+
+        ast->assign.type = realloc(ast->assign.type, (strlen(ast->assign.type) + 2) * sizeof(char));
+        strcat(ast->assign.type, "*");
+
+        if (prs->tok->type == TOK_EQUAL)
+            goto prs_id_assign_value;
+    }
+
+    ast->assign.value = value;
+    ast->assign.arr_cap = cap;
 
     if (sym == NULL && type != NULL)
         sym_append(ast);
@@ -532,7 +595,7 @@ AST *prs_id_call(Prs *prs, char *name, size_t ln, size_t col) {
         if (arg->type == AST_VAR) {
             AST *arg_sym = sym_find(AST_ASSIGN, arg->scope_def, arg->var.name);
 
-            if (param->assign.mut != arg_sym->assign.mut) {
+            if (param->assign.mut && !arg_sym->assign.mut) {
                 fprintf(stderr, "%s:%zu:%zu: error: conflicting kinds of mutability in argument %zu of call to function '%s'\n", prs->file, arg->ln, arg->col, args_cnt, name);
                 exit(EXIT_FAILURE);
             }
@@ -758,7 +821,49 @@ AST *prs_id_for(Prs *prs, size_t ln, size_t col) {
     return ast;
 }
 
-AST *prs_id_cast(Prs *prs, char *type, size_t ln, size_t col) {
+AST *prs_id_subscr(Prs *prs, char *name, size_t ln, size_t col) {
+    AST *sym = sym_find(AST_ASSIGN, prs->cur_scope, name);
+    if (sym == NULL) {
+        fprintf(stderr, "%s:%zu:%zu: Error: Undefined variable '%s'\n", prs->file, ln, col, name);
+        exit(EXIT_FAILURE);
+    }
+
+    prs_eat(prs, TOK_LSQUARE);
+    AST *index = prs_value(prs, NULL);
+
+    switch (index->type) {
+        case AST_INT:
+        case AST_VAR:
+        case AST_CALL:
+        case AST_MATH:
+        case AST_SUBSCR: break;
+        default:
+            fprintf(stderr, "%s:%zu:%zu: error: invalid array index of type '%s'\n", prs->file, index->ln, index->col, ast_types[index->type]);
+            exit(EXIT_FAILURE);
+    }
+
+    prs_eat(prs, TOK_RSQUARE);
+
+    AST *ast = ast_init(AST_SUBSCR, prs->cur_scope, prs->cur_func, ln, col);
+    ast->subscr.name = name;
+    ast->subscr.index = index;
+
+    if (prs->tok->type == TOK_EQUAL) {
+        if (!sym->assign.mut) {
+            fprintf(stderr, "%s:%zu:%zu: error: reassigning immutable variable '%s'\n", prs->file, ln, col, name);
+            exit(EXIT_FAILURE);
+        }
+
+        char *base_type = strdup(sym->assign.type);
+        base_type[strlen(base_type) - 1] = '\0';
+
+        prs_eat(prs, TOK_EQUAL);
+        ast->subscr.value = prs_value(prs, base_type);
+        free(base_type);
+    } else
+        ast->subscr.value = NULL;
+
+    return ast;
 }
 
 AST *prs_id(Prs *prs) {
@@ -777,6 +882,12 @@ AST *prs_id(Prs *prs) {
     }
 
     if (is_type(id)) {
+        while (prs->tok->type == TOK_STAR) {
+            id = realloc(id, (strlen(id) + 2) * sizeof(char));
+            strcat(id, "*");
+            prs_eat(prs, TOK_STAR);
+        }
+
         char *name = strdup(prs->tok->value);
         prs_eat(prs, TOK_ID);
 
@@ -808,6 +919,8 @@ AST *prs_id(Prs *prs) {
         return prs_id_call(prs, id, ln, col);
     else if (prs->tok->type == TOK_PLUS_EQ || prs->tok->type == TOK_MINUS_EQ || prs->tok->type == TOK_STAR_EQ || prs->tok->type == TOK_SLASH_EQ || prs->tok->type == TOK_PERCENT_EQ)
         return prs_id_quick_math(prs, id, ln, col);
+    else if (prs->tok->type == TOK_LSQUARE)
+        return prs_id_subscr(prs, id, ln, col);
     else if (sym_find(AST_ASSIGN, prs->cur_scope, id) != NULL) {
         AST *ast = ast_init(AST_VAR, prs->cur_scope, prs->cur_func, ln, col);
         ast->var.name = id;
@@ -819,16 +932,45 @@ AST *prs_id(Prs *prs) {
 }
 
 AST *prs_data(Prs *prs) {
-    AST *ast = ast_init(prs->tok->type == TOK_INT ? AST_INT : AST_FLOAT, prs->cur_scope, prs->cur_func, prs->tok->ln, prs->tok->col);
-    char *endptr;
-    ast->data.digit = strtold(prs->tok->value, &endptr);
+    AST *ast;
+    
+    if (prs->tok->type == TOK_STR) {
+        ast = ast_init(AST_STR, prs->cur_scope, prs->cur_func, prs->tok->ln, prs->tok->col);
+        ast->data.str = strdup(prs->tok->value);
+    } else {
+        ast = ast_init(prs->tok->type == TOK_INT ? AST_INT : AST_FLOAT, prs->cur_scope, prs->cur_func, prs->tok->ln, prs->tok->col);
+        char *endptr;
+        ast->data.digit = strtold(prs->tok->value, &endptr);
 
-    if (endptr == prs->tok->value || errno == ERANGE) {
-        fprintf(stderr, "%s:%zu:%zu: error: digit conversion failed: %s\n", prs->file, prs->tok->ln, prs->tok->col, strerror(errno));
-        exit(EXIT_FAILURE);
+        if (endptr == prs->tok->value || errno == ERANGE) {
+            fprintf(stderr, "%s:%zu:%zu: error: digit conversion failed: %s\n", prs->file, prs->tok->ln, prs->tok->col, strerror(errno));
+            exit(EXIT_FAILURE);
+        }
     }
 
     prs_eat(prs, prs->tok->type);
+    return ast;
+}
+
+AST *prs_arr_lst(Prs *prs) {
+    AST *ast = ast_init(AST_ARR_LST, prs->cur_scope, prs->cur_func, prs->tok->ln, prs->tok->col);
+    AST **items = calloc(1, sizeof(AST *));
+    size_t items_cnt = 0;
+    prs_eat(prs, TOK_LBRACE);
+
+    while (prs->tok->type != TOK_RBRACE && prs->tok->type != TOK_EOF) {
+        if (items_cnt > 0)
+            prs_eat(prs, TOK_COMMA);
+
+        items = realloc(items, (items_cnt + 1) * sizeof(AST *));
+        items[items_cnt++] = prs_value(prs, NULL);
+        // TODO: probably check for pointers here
+    }
+
+    prs_eat(prs, TOK_RBRACE);
+
+    ast->arr_lst.items = items;
+    ast->arr_lst.items_cnt = items_cnt;
     return ast;
 }
 
@@ -836,7 +978,9 @@ AST *prs_stmt(Prs *prs) {
     switch (prs->tok->type) {
         case TOK_ID: return prs_id(prs);
         case TOK_INT:
-        case TOK_FLOAT: return prs_data(prs);
+        case TOK_FLOAT:
+        case TOK_STR: return prs_data(prs);
+        case TOK_LBRACE: return prs_arr_lst(prs);
         default:
             fprintf(stderr, "%s:%zu:%zu: error: invalid statement '%s'\n", prs->file, prs->tok->ln, prs->tok->col, tok_types[prs->tok->type]);
             exit(EXIT_FAILURE);

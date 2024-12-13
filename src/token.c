@@ -31,7 +31,10 @@ const char *tok_types[] = {
     [TOK_NOT_EQ] = "not equal",
     [TOK_EQ_EQ] = "equal equal",
     [TOK_AND] = "and",
-    [TOK_OR] = "or"
+    [TOK_OR] = "or",
+    [TOK_LSQUARE] = "left square",
+    [TOK_RSQUARE] = "right square",
+    [TOK_STR] = "string"
 };
 
 Tok *tok_init(TokType type, char *value, size_t ln, size_t col) {

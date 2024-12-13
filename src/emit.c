@@ -62,12 +62,13 @@ size_t rsp = 0;
 size_t rsp_cap = 0;
 size_t float_cnt = 0;
 size_t label_cnt = 0;
+size_t str_cnt = 0;
 char *func_data;
 char *sect_data;
 bool float_math_result = false;
 
 void globs_reset() {
-    rsp = rsp_cap = float_cnt = label_cnt = 0;
+    rsp = rsp_cap = float_cnt = label_cnt = str_cnt = 0;
     func_data = realloc(func_data, 1 * sizeof(char));
     func_data[0] = '\0';
 }
@@ -92,6 +93,57 @@ char *label_init() {
     char *label = calloc(32, sizeof(char));
     sprintf(label, ".l%zu", label_cnt++);
     return label;
+}
+
+size_t str_init(char *value) {
+    char *data = calloc(1, sizeof(char));
+    char *next;
+
+    for (size_t i = 0; i < strlen(value); i++) {
+        next = calloc(16, sizeof(char));
+
+        if (value[i] == '\\') {
+            i++;
+
+            switch (value[i]) {
+                case 'n':
+                    strcpy(next, "10");
+                    break;
+                case 't':
+                    strcpy(next, "9");
+                    break;
+                case 'r':
+                    strcpy(next, "13");
+                    break;
+                case '0':
+                    strcpy(next, "0");
+                    break;
+                case '\'':
+                case '"':
+                case '\\':
+                    sprintf(next, "%d", (int)value[i]);
+                    break;
+                default: assert(false);
+            }
+        } else
+            sprintf(next, "%d", (int)value[i]);
+
+        strcat(next, ",");
+
+        data = realloc(data, (strlen(data) + strlen(next) + 1) * sizeof(char));
+        strcat(data, next);
+        free(next);
+    }
+
+    char *str = calloc(strlen(data) + 64, sizeof(char));
+    sprintf(str, ".s%zu:\n"
+                 "    db %s0\n", str_cnt, data);
+    free(data);
+
+    func_data = realloc(func_data, (strlen(func_data) + strlen(str) + 1) * sizeof(char));
+    strcat(func_data, str);
+    free(str);
+    return str_cnt++;
 }
 
 unsigned int power_of_two(unsigned int x) {
@@ -597,24 +649,70 @@ char *emit_call(AST *ast) {
     return code;
 }
 
+char *emit_subscr(AST *ast);
+
 char *emit_assign(AST *ast) {
     char *code;
     char *sub_rsp = NULL;
-    AST *value = ast->assign.value;
+    AST *value;
+    AST *sym;
+    char *type;
+    char *rbp;
 
-    AST *sym = sym_find(AST_ASSIGN, ast->scope_def, ast->assign.name);
-    char *type = sym->assign.type;
-    char *rbp = sym->assign.rbp;
+    if (ast->type == AST_SUBSCR) {
+        sym = sym_find(AST_ASSIGN, ast->scope_def, ast->subscr.name);
+        type = strdup(sym->assign.type);
+        type[strlen(type) - 1] = '\0';
 
-    if (ast->assign.type != NULL) {
+        sub_rsp = emit_subscr(ast);
+        rbp = calloc(128, sizeof(char));
+        strcpy(rbp, sym->assign.rbp);
+        rbp[strlen(rbp) - 1] = '\0';
+        strcat(rbp, "+r10*");
+
         size_t size;
-
-        if (strcmp(ast->assign.type, "char") == 0)
+        if (strcmp(type, "char") == 0)
             size = 1;
-        else if (strcmp(ast->assign.type, "int") == 0 || strcmp(ast->assign.type, "float") == 0)
+        else if (strcmp(type, "int") == 0 || strcmp(type, "float") == 0)
             size = 4;
         else
             size = 8;
+
+        char buf[64];
+        sprintf(buf, "%zu", size);
+        strcat(rbp, buf);
+        strcat(rbp, "]");
+
+        value = ast->subscr.value;
+    } else {
+        sym = sym_find(AST_ASSIGN, ast->scope_def, ast->assign.name);
+        value = ast->assign.value;
+        type = sym->assign.type;
+        rbp = sym->assign.rbp;
+    }
+
+    if (ast->type == AST_ASSIGN && ast->assign.type != NULL) {
+        size_t size;
+        size_t cnt;
+        char *var_type;
+
+        if (ast->assign.arr_cap > 0) {
+            var_type = strdup(type);
+            var_type[strlen(var_type) - 1] = '\0';
+            cnt = ast->assign.arr_cap;
+        } else {
+            var_type = strdup(type);
+            cnt = 1;
+        }
+
+        if (strcmp(var_type, "char") == 0)
+            size = cnt * 1;
+        else if (strcmp(var_type, "int") == 0 || strcmp(var_type, "float") == 0)
+            size = cnt * 4;
+        else
+            size = cnt * 8;
+
+        free(var_type);
 
         rsp += size;
         rbp = calloc(32, sizeof(char));
@@ -622,9 +720,13 @@ char *emit_assign(AST *ast) {
         sym->assign.rbp = rbp;
 
         if (rsp > rsp_cap) {
+            size_t before = rsp_cap;
+
+            while (rsp > rsp_cap)
+                rsp_cap += SUB_RSP_SIZE;
+
             sub_rsp = calloc(64, sizeof(char));
-            sprintf(sub_rsp, "    sub rsp, %zu\n", SUB_RSP_SIZE);
-            rsp_cap += SUB_RSP_SIZE;
+            sprintf(sub_rsp, "    sub rsp, %zu\n", rsp_cap - before);
         }
     }
 
@@ -705,7 +807,7 @@ char *emit_assign(AST *ast) {
                     sprintf(temp, "    cvttss2si eax, xmm0\n"
                                   "    mov dword %s, eax\n", rbp);
                 else
-                    sprintf(temp, "    mov byte %s, eax\n", rbp);
+                    sprintf(temp, "    mov dword %s, eax\n", rbp);
             } else if (strcmp(type, "float") == 0) {
                 if (strcmp(call_type, "float") == 0)
                     sprintf(temp, "    movss dword %s, xmm0\n", rbp);
@@ -714,6 +816,15 @@ char *emit_assign(AST *ast) {
                                   "    movss dword %s, xmm0\n", rbp);
             } else
                 sprintf(temp, "    mov qword %s, rax\n", rbp);
+
+            if (ast->type == AST_SUBSCR) {
+                char *temp2 = calloc(strlen(code) + 64, sizeof(char));
+                sprintf(temp2, "    push r10\n"
+                               "%s"
+                               "    pop r10\n", code);
+                free(code);
+                code = temp2;
+            }
 
             code = realloc(code, (strlen(code) + strlen(temp) + 1) * sizeof(char));
             strcat(code, temp);
@@ -744,11 +855,45 @@ char *emit_assign(AST *ast) {
                                  "    movss dword %s, xmm0\n", rbp);
             }
 
+            if (ast->type == AST_SUBSCR) {
+                char *temp = calloc(strlen(code) + 64, sizeof(char));
+                sprintf(temp, "    push r10\n"
+                              "%s"
+                              "    pop r10\n", code);
+                free(code);
+                code = temp;
+            }
+
             code = realloc(code, (strlen(code) + strlen(fix) + 1) * sizeof(char));
             strcat(code, fix);
             free(fix);
             break;
         }
+        case AST_STR:
+            code = calloc(strlen(rbp) + 64, sizeof(char));
+            sprintf(code, "    mov rax, qword [.s%zu]\n"
+                          "    mov qword %s, rax\n", str_init(value->data.str), rbp);
+            break;
+            /*
+        case AST_ARR_LST: {
+            char *base_type = strdup(sym->assign.type);
+            base_type[strlen(base_type) - 1] = '\0';
+
+            size_t size_each;
+            if (strcmp(base_type, "char") == 0)
+                size_each = 1;
+            else if (strcmp(base_type, "int") == 0 || strcmp(base_type, "float") == 0)
+                size_each = 4;
+            else
+                size_each = 8;
+
+            AST *at;
+            char *next;
+
+            free(base_type);
+            break;
+        }
+        */
         default: assert(false);
     }
 
@@ -756,6 +901,12 @@ char *emit_assign(AST *ast) {
         sub_rsp = realloc(sub_rsp, (strlen(sub_rsp) + strlen(code) + 1) * sizeof(char));
         strcat(sub_rsp, code);
         free(code);
+
+        if (ast->type == AST_SUBSCR) {
+            free(type);
+            free(rbp);
+        }
+
         return sub_rsp;
     }
 
@@ -1121,8 +1272,12 @@ char *emit_math_expr(AST *left, AST *right, TokType type) {
         case TOK_STAR:
             if (is_float)
                 sprintf(math, "    mulss %s, %s\n", left_value, right_value);
-            else
-                sprintf(math, "    imul %s, %s\n", left_value, right_value);
+            else {
+                if (right->data.digit >= 0 && is_power_of_two((unsigned int)right->data.digit))
+                    sprintf(math, "    sal %s, %u\n", left_value, power_of_two((unsigned int)right->data.digit));
+                else
+                    sprintf(math, "    imul %s, %s\n", left_value, right_value);
+            }
             break;
         case TOK_SLASH:
             if (is_float) {
@@ -1681,6 +1836,56 @@ char *emit_for(AST *ast) {
     return code;
 }
 
+char *emit_subscr(AST *ast) {
+    AST *index = ast->subscr.index;
+    char *code;
+
+    switch (index->type) {
+        case AST_INT:
+            // TODO: maybe just evaluate this into a constant?
+            code = calloc(64, sizeof(char));
+            sprintf(code, "    mov r10d, %d\n", (int)index->data.digit);
+            break;
+        case AST_VAR: {
+            AST *var = sym_find(AST_ASSIGN, index->scope_def, index->var.name);
+            code = calloc(strlen(var->assign.rbp) + 64, sizeof(char));
+
+            if (strcmp(var->assign.type, "char") == 0)
+                sprintf(code, "    movsx r10d, byte %s\n", var->assign.rbp);
+            else if (strcmp(var->assign.type, "int") == 0)
+                sprintf(code, "    mov r10d, dword %s\n", var->assign.rbp);
+            else
+                sprintf(code, "    cvttss2si r10d, dword %s\n", var->assign.rbp);
+            break;
+        }
+        case AST_CALL:
+        case AST_MATH:
+            char *type;
+            if (index->type == AST_CALL)
+                type = sym_find(AST_FUNC, "<global>", index->call.name)->func.type;
+            else {
+                if (float_math_result)
+                    type = "float";
+                else
+                    type = "int";
+            }
+
+            code = emit_ast(index);
+            code = realloc(code, (strlen(code) + 64) * sizeof(char));
+
+            if (strcmp(type, "char") == 0 || strcmp(type, "int") == 0)
+                strcat(code, "    mov r10d, eax\n");
+            else if (strcmp(type, "float") == 0)
+                strcat(code, "    cvttss2si r10d, xmm0\n");
+            else
+                strcat(code, "    mov r10, rax\n");
+            break;
+        default: assert(false);
+    }
+
+    return code;
+}
+
 char *emit_ast(AST *ast) {
     switch (ast->type) {
         case AST_ROOT: return emit_root(ast);
@@ -1692,6 +1897,7 @@ char *emit_ast(AST *ast) {
         case AST_IF_ELSE: return emit_if_else(ast);
         case AST_WHILE: return emit_while(ast);
         case AST_FOR: return emit_for(ast);
+        case AST_SUBSCR: return ast->subscr.value == NULL ? emit_subscr(ast) : emit_assign(ast);
         default:
             fprintf(stderr, "steelc: error: missing backend for '%s'\n", ast_types[ast->type]);
             exit(EXIT_FAILURE);

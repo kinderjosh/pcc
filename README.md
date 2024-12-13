@@ -18,8 +18,8 @@ This is NOT a replacement for C, because nothing will replace C. This is just a 
 - [x] - Math
 - [x] - Conditions
 - [x] - Loops
-- [ ] - Arrays
-- [ ] - Pointers
+- [x] - Arrays
+- [x] - Pointers
 - [ ] - Includes
 - [ ] - Begin standard library
 
