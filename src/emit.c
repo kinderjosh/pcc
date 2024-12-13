@@ -568,6 +568,7 @@ char *emit_call(AST *ast) {
             free(temp);
             free(next);
             rsp = beg_rsp;
+            free(loc);
             continue;
         }
         
@@ -577,6 +578,7 @@ char *emit_call(AST *ast) {
         free(next);
         free(loc);
     }
+
     code = realloc(code, (strlen(code) + strlen(ast->call.name) + 32) * sizeof(char));
     strcat(code, "    call ");
     strcat(code, ast->call.name);
@@ -1691,7 +1693,7 @@ char *emit_ast(AST *ast) {
         case AST_WHILE: return emit_while(ast);
         case AST_FOR: return emit_for(ast);
         default:
-            fprintf(stderr, "pcc: error: missing backend for '%s'\n", ast_types[ast->type]);
+            fprintf(stderr, "steelc: error: missing backend for '%s'\n", ast_types[ast->type]);
             exit(EXIT_FAILURE);
     }
 }

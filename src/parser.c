@@ -187,6 +187,8 @@ AST **prs_body(Prs *prs, size_t *cnt, bool allow_no_braces) {
                     fprintf(stderr, "%s:%zu:%zu: error: call to function '%s' will result in infinite recursion\n", prs->file, stmt->ln, stmt->col, stmt->call.name);
                     exit(EXIT_FAILURE);
                 }
+
+                prs_eat(prs, TOK_SEMI);
                 break;
             case AST_ASSIGN:
             case AST_RET:
@@ -452,17 +454,25 @@ AST *prs_id_func(Prs *prs, char *name, char *type, size_t ln, size_t col) {
     return ast;
 }
 
-AST *prs_id_assign(Prs *prs, char *name, char *type, size_t ln, size_t col) {
+AST *prs_id_assign(Prs *prs, char *name, char *type, bool mut, size_t ln, size_t col) {
     AST *sym = sym_find(AST_ASSIGN, prs->cur_scope, name);
     if (type != NULL && sym != NULL) {
         fprintf(stderr, "%s:%zu:%zu: error: redefinition of variable '%s'; first defined at %zu:%zu\n", prs->file, ln, col, name, sym->ln, sym->col);
         exit(EXIT_FAILURE);
     }
 
+    if (sym != NULL && type == NULL && !sym->assign.mut) {
+        fprintf(stderr, "%s:%zu:%zu: error: reassigning immutable variable '%s'\n", prs->file, ln, col, name);
+        exit(EXIT_FAILURE);
+    } else if (sym != NULL && type != NULL)
+        mut = sym->assign.mut;
+
+
     AST *ast = ast_init(AST_ASSIGN, prs->cur_scope, prs->cur_func, ln, col);
     ast->assign.name = name;
     ast->assign.type = type;
     ast->assign.rbp = NULL;
+    ast->assign.mut = mut;
 
     if (prs->tok->type == TOK_EQUAL) {
         prs_eat(prs, TOK_EQUAL);
@@ -470,7 +480,7 @@ AST *prs_id_assign(Prs *prs, char *name, char *type, size_t ln, size_t col) {
     } else
         ast->assign.value = NULL;
 
-    if (type != NULL)
+    if (sym == NULL && type != NULL)
         sym_append(ast);
 
     return ast;
@@ -506,6 +516,7 @@ AST *prs_id_call(Prs *prs, char *name, size_t ln, size_t col) {
     AST **args = calloc(1, sizeof(AST *));
     size_t args_cnt = 0;
     AST *param;
+    AST *arg;
     prs_eat(prs, TOK_LPAREN);
 
     while (prs->tok->type != TOK_RPAREN && prs->tok->type != TOK_EOF) {
@@ -516,8 +527,19 @@ AST *prs_id_call(Prs *prs, char *name, size_t ln, size_t col) {
             prs_eat(prs, TOK_COMMA);
 
         param = sym->func.params[args_cnt];
+        arg = prs_value(prs, param->assign.type);
+
+        if (arg->type == AST_VAR) {
+            AST *arg_sym = sym_find(AST_ASSIGN, arg->scope_def, arg->var.name);
+
+            if (param->assign.mut != arg_sym->assign.mut) {
+                fprintf(stderr, "%s:%zu:%zu: error: conflicting kinds of mutability in argument %zu of call to function '%s'\n", prs->file, arg->ln, arg->col, args_cnt, name);
+                exit(EXIT_FAILURE);
+            }
+        }
+
         args = realloc(args, (args_cnt + 1) * sizeof(AST *));
-        args[args_cnt++] = prs_value(prs, param->assign.type);
+        args[args_cnt++] = arg;
     }
 
     prs_eat(prs, TOK_RPAREN);
@@ -604,6 +626,9 @@ AST *prs_id_quick_math(Prs *prs, char *name, size_t ln, size_t col) {
     AST *sym = sym_find(AST_ASSIGN, prs->cur_scope, name);
     if (sym == NULL) {
         fprintf(stderr, "%s:%zu:%zu: Error: Undefined variable '%s'\n", prs->file, ln, col, name);
+        exit(EXIT_FAILURE);
+    } else if (!sym->assign.mut) {
+        fprintf(stderr, "%s:%zu:%zu: error: reassigning immutable variable '%s'\n", prs->file, ln, col, name);
         exit(EXIT_FAILURE);
     }
 
@@ -736,9 +761,17 @@ AST *prs_id_for(Prs *prs, size_t ln, size_t col) {
 AST *prs_id(Prs *prs) {
     size_t ln = prs->tok->ln;
     size_t col = prs->tok->col;
+    bool mut = false;
 
     char *id = strdup(prs->tok->value);
     prs_eat(prs, TOK_ID);
+
+    if (strcmp(id, "mut") == 0) {
+        id = realloc(id, (strlen(prs->tok->value) + 1) * sizeof(char));
+        strcpy(id, prs->tok->value);
+        prs_eat(prs, TOK_ID);
+        mut = true;
+    }
 
     if (is_type(id)) {
         char *name = strdup(prs->tok->value);
@@ -747,8 +780,15 @@ AST *prs_id(Prs *prs) {
         if (prs->tok->type == TOK_LPAREN)
             return prs_id_func(prs, name, id, ln, col);
 
-        return prs_id_assign(prs, name, id, ln, col);
-    } else if (strcmp(id, "return") == 0) {
+        return prs_id_assign(prs, name, id, mut, ln, col);
+    }
+
+    if (mut) {
+        fprintf(stderr, "%s:%zu:%zu: error: expected variable declaration following 'mut'\n", prs->file, ln, col);
+        exit(EXIT_FAILURE);
+    }
+    
+    if (strcmp(id, "return") == 0) {
         free(id);
         return prs_id_ret(prs, ln, col);
     } else if (strcmp(id, "if") == 0) {
@@ -760,7 +800,7 @@ AST *prs_id(Prs *prs) {
         free(id);
         return prs_id_for(prs, ln, col);
     } else if (prs->tok->type == TOK_EQUAL)
-        return prs_id_assign(prs, id, NULL, ln, col);
+        return prs_id_assign(prs, id, NULL, mut, ln, col);
     else if (prs->tok->type == TOK_LPAREN)
         return prs_id_call(prs, id, ln, col);
     else if (prs->tok->type == TOK_PLUS_EQ || prs->tok->type == TOK_MINUS_EQ || prs->tok->type == TOK_STAR_EQ || prs->tok->type == TOK_SLASH_EQ || prs->tok->type == TOK_PERCENT_EQ)

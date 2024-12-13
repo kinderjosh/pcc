@@ -67,6 +67,7 @@ typedef struct AST {
             char *type;
             char *rbp;
             AST *value;
+            bool mut;
         } assign;
 
         struct {
