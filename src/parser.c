@@ -758,6 +758,9 @@ AST *prs_id_for(Prs *prs, size_t ln, size_t col) {
     return ast;
 }
 
+AST *prs_id_cast(Prs *prs, char *type, size_t ln, size_t col) {
+}
+
 AST *prs_id(Prs *prs) {
     size_t ln = prs->tok->ln;
     size_t col = prs->tok->col;
