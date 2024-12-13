@@ -2,7 +2,7 @@
 
 # Steel C
 
-Steel C is a reimplementation of the C language from scratch. It aims to be stricter and safer through the introduction of immutable variables and a strongly typed syntax.
+Steel C is a reimplementation of the C language from scratch. It aims to be stricter and safer through the introduction of immutable variables and a strongly typed syntax. It doesn't use LLVM either, it has its own custom backend that only generates x86-64 Linux assembly.
 
 This is NOT a replacement for C, because nothing will replace C. This is just a fun little project of mine.
 
