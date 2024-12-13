@@ -1,4 +1,4 @@
-<img height=100 src="res/shield.svg" alt="logo">
+<img height=100 src="res/shield.png" alt="logo">
 
 # Steel C
 
