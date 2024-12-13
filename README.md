@@ -1,9 +1,13 @@
-# PCC - Perfect C Compiler
+<img height=100 src="res/shield.svg" alt="logo">
 
-> [!IMPORTANT]
-> PCC is still a work-in-progress, expect bugs and missing features.
+# Steel C
 
-PCC is my own implementation of the C language. It only compiles for x86-64 Linux systems, assembled with [nasm](https://nasm.us). It doesn't use LLVM, the whole thing is built completely from scratch.
+Steel C is a reimplementation of the C language from scratch. It aims to be stricter and safer through the introduction of immutable variables and a strongly typed syntax.
+
+This is NOT a replacement for C, because nothing will replace C. This is just a fun little project of mine.
+
+> [!WARNING]
+> This language is still in development and not designed to be used yet. Expect breaking bugs and missing features.
 
 ## Development Progress
 
@@ -14,7 +18,9 @@ PCC is my own implementation of the C language. It only compiles for x86-64 Linu
 - [x] - Math
 - [x] - Conditions
 - [x] - Loops
+- [ ] - Type casting
 - [ ] - Arrays
+- [ ] - Pointers
 - [ ] - Includes
 - [ ] - Begin standard library
 
@@ -27,15 +33,15 @@ PCC is my own implementation of the C language. It only compiles for x86-64 Linu
 ## Quick Start
 
 ```bash
-git clone https://github.com/kinderjosh/pcc.git
-cd pcc
+git clone https://github.com/kinderjosh/steelc.git
+cd steelc
 make
 ```
 
 ## Usage
 
 ```
-./pcc [options...] <input file>
+./steelc [options...] <input file>
 ```
 
 ### Options

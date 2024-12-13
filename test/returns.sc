@@ -8,7 +8,7 @@ int get1() {
 }
 
 float get2() {
-    char c;
+    mut char c;
     c = 'A';
     return c;
 }

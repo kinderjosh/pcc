@@ -1,10 +1,10 @@
 void main() {
-    for (int i = 0; i < 10; i += 1) {
-        float a = i;
+    for (mut int i = 0; i < 10; i += 1) {
+        mut float a = i;
         a = a / i * 9.9;
     }
 
-    int i = 10;
+    mut int i = 10;
 
     while (i > 5 && i < 20)
         i /= 2;

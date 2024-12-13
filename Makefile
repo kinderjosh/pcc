@@ -3,7 +3,7 @@ CFLAGS = -Wall -Wextra -Wno-discarded-qualifiers -g -O2 -std=c99 -fPIC -fpie -D_
 
 SRC_DIR = src
 OBJ_DIR = obj
-TARGET = pcc
+TARGET = steelc
 
 SRCS = $(wildcard $(SRC_DIR)/*.c)
 OBJS = $(patsubst $(SRC_DIR)/%.c, $(OBJ_DIR)/%.o, $(SRCS))

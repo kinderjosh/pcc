@@ -1,6 +1,6 @@
 obj
-pcc
-target.c
+steelc
+target.sc
 a.out
 *.asm
 *.o
