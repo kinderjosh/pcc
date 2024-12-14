@@ -18,11 +18,6 @@ size_t sym_cnt = 0;
 char **included;
 size_t included_cnt = 0;
 
-typedef struct {
-    char *name;
-    AST *value;
-} Const;
-
 Const **constants;
 size_t constants_cnt = 0;
 
@@ -984,11 +979,31 @@ AST *prs_id(Prs *prs) {
 
     char *id = strdup(prs->tok->value);
 
+    if (is_constant(id)) {
+        Const *cons = get_constant(id);
+        free(id);
+
+        if (cons->value->type == AST_STR) {
+            prs->tok->value = realloc(prs->tok->value, (strlen(cons->value->data.str) + 1) * sizeof(char));
+            strcpy(prs->tok->value, cons->value->data.str);
+            prs->tok->type = TOK_STR;
+        } else if (cons->value->type == AST_INT) {
+            prs->tok->value = realloc(prs->tok->value, 64 * sizeof(char));
+            sprintf(prs->tok->value, "%d", (int)cons->value->data.digit);
+            prs->tok->type = TOK_INT;
+        } else {
+            prs->tok->value = realloc(prs->tok->value, 64 * sizeof(char));
+            sprintf(prs->tok->value, "%f", (float)cons->value->data.digit);
+            prs->tok->type = TOK_FLOAT;
+        }
+
+        return prs_data(prs);
+    }
+
     if (strcmp(id, "mut") == 0) {
         prs_eat(prs, TOK_ID);
         id = realloc(id, (strlen(prs->tok->value) + 1) * sizeof(char));
         strcpy(id, prs->tok->value);
-        prs_eat(prs, TOK_ID);
         mut = true;
     }
 
@@ -1013,27 +1028,6 @@ AST *prs_id(Prs *prs) {
     if (mut) {
         fprintf(stderr, "%s:%zu:%zu: error: expected variable declaration following 'mut'\n", prs->file, ln, col);
         exit(EXIT_FAILURE);
-    }
-
-    if (is_constant(id)) {
-        Const *cons = get_constant(id);
-        free(id);
-        
-        if (cons->value->type == AST_STR) {
-            prs->tok->value = realloc(prs->tok->value, (strlen(cons->value->data.str) + 1) * sizeof(char));
-            strcpy(prs->tok->value, cons->value->data.str);
-            prs->tok->type = TOK_STR;
-        } else if (cons->value->type == AST_INT) {
-            prs->tok->value = realloc(prs->tok->value, 64 * sizeof(char));
-            sprintf(prs->tok->value, "%d", (int)cons->value->data.digit);
-            prs->tok->type = TOK_INT;
-        } else {
-            prs->tok->value = realloc(prs->tok->value, 64 * sizeof(char));
-            sprintf(prs->tok->value, "%f", (float)cons->value->data.digit);
-            prs->tok->type = TOK_FLOAT;
-        }
-
-        return prs_data(prs);
     }
 
     prs_eat(prs, TOK_ID);
@@ -1062,6 +1056,7 @@ AST *prs_id(Prs *prs) {
         ast->var.name = id;
         return ast;
     }
+
 
     fprintf(stderr, "%s:%zu:%zu: error: unknown identifier '%s'\n", prs->file, ln, col, id);
     exit(EXIT_FAILURE);
@@ -1262,7 +1257,7 @@ void prs_preproc(Prs *prs) {
 
         cons->value = prs_data(prs);
 
-        constants = realloc(constants, (constants_cnt + 1) * sizeof(char *));
+        constants = realloc(constants, (constants_cnt + 1) * sizeof(Const *));
         constants[constants_cnt++] = cons;
         return;
     }
@@ -1346,14 +1341,6 @@ AST *prs_file(char *file) {
     for (size_t i = 0; i < included_cnt; i++)
         free(included[i]);
     free(included);
-
-    for (size_t i = 0; i < constants_cnt; i++) {
-        ast_del(constants[i]->value);
-        free(constants[i]->name);
-        free(constants[i]);
-    }
-
-    free(constants);
 
     AST *root = ast_init(AST_ROOT, "<internal>", "<internal>", 0, 0);
     root->root.asts = asts;

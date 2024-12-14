@@ -13,6 +13,8 @@
 extern const char *ast_types[];
 extern AST **sym_tab;
 extern size_t sym_cnt;
+extern Const **constants;
+extern size_t constants_cnt;
 
 enum {
     RAX,
@@ -214,6 +216,15 @@ char *emit_root(AST *ast) {
     free(sect_data);
     free(sym_tab);
     sym_cnt = 0;
+
+    for (size_t i = 0; i < constants_cnt; i++) {
+        ast_del(constants[i]->value);
+        free(constants[i]->name);
+        free(constants[i]);
+    }
+
+    constants_cnt = 0;
+
     return code;
 }
 

@@ -15,6 +15,11 @@ typedef struct {
     bool in_math;
 } Prs;
 
+typedef struct {
+    char *name;
+    AST *value;
+} Const;
+
 AST *sym_find(ASTType type, char *scope, char *name);
 AST *prs_stmt(Prs *prs);
 AST *prs_file(char *file);

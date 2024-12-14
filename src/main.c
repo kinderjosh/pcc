@@ -7,6 +7,8 @@
 #include <stdbool.h>
 #include <dirent.h>
 
+extern Const **constants;
+
 void test(char *file) {
     AST *root = prs_file(file);
     free(emit_ast(root));
@@ -72,7 +74,7 @@ int main(int argc, char **argv) {
         char *path = calloc(1, sizeof(char));
 
         while ((de = readdir(dr)) != NULL) {
-            if (strcmp(de->d_name, "..") == 0 || strcmp(de->d_name, ".") == 0)
+            if (strcmp(de->d_name, "..") == 0 || strcmp(de->d_name, ".") == 0 || strcmp(de->d_name, "include.sc") == 0)
                 continue;
 
             path = realloc(path, (strlen(test_dir) + strlen(de->d_name) + 2) * sizeof(char));
@@ -85,12 +87,14 @@ int main(int argc, char **argv) {
 
         free(path);
         closedir(dr);
+        free(constants);
         return EXIT_SUCCESS;
     }
 
     AST *root = prs_file(file);
     char *code = emit_ast(root);
     ast_del(root);
+    free(constants);
 
     char *outasm;
     char *outbase;
