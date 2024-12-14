@@ -1043,6 +1043,7 @@ char *emit_ret(AST *ast) {
                     sprintf(temp, "%s    cvttss2si eax, dword %s+r10*1]\n", code, rbp);
             }
 
+            free(base_type);
             free(code);
             code = temp;
             break;
@@ -1137,6 +1138,7 @@ char *emit_math_expr(AST *left, AST *right, TokType type) {
                 is_float = true;
             }
 
+            free(base_type);
             free(code);
             code = temp;
             break;
@@ -1453,6 +1455,7 @@ char *emit_math_expr(AST *left, AST *right, TokType type) {
                 sprintf(right_value, "dword %s+r10*4]", rbp);
             }
 
+            free(base_type);
             rsp -= 8;
             free(setup);
             setup = temp;
@@ -1717,6 +1720,7 @@ char *emit_cond(AST **expr, size_t expr_cnt, char *true_label, char *false_label
                     is_float = true;
                 }
 
+                free(base_type);
                 free(setup);
                 setup = temp;
                 break;
@@ -2004,6 +2008,7 @@ char *emit_cond(AST **expr, size_t expr_cnt, char *true_label, char *false_label
                     sprintf(right_value, "dword %s+r10*4]", rbp);
                 }
 
+                free(base_type);
                 rsp -= 8;
                 free(setup);
                 setup = temp;
