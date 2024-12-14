@@ -1,10 +1,8 @@
-<img height=100 src="res/shield2.png" alt="logo">
+[![build](https://github.com/kinderjosh/steelc/actions/workflows/build.yml/badge.svg)](https://github.com/kinderjosh/steelc/actions/workflows/build.yml)
 
-# Steel C
+# The Steel C Language
 
-Steel C is a reimplementation of the C language from scratch. It aims to be stricter and safer through the introduction of immutable variables and a strongly typed syntax. It doesn't use LLVM, it has its own custom backend that only generates x86-64 Linux assembly.
-
-This is NOT a replacement for C, because nothing will replace C. This is just a fun little project of mine.
+Steel C is an immutable, strongly-typed language that aims to be safer and more convenient than C. The language is written completely from scratch without the use of LLVM or any third-party libraries. This means that the compiler **only targets x86-64 Linux systems and no other architectures**.
 
 > [!WARNING]
 > This language is still in development and not designed to be used yet. Expect breaking bugs and missing features.
