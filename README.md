@@ -20,8 +20,9 @@ This is NOT a replacement for C, because nothing will replace C. This is just a 
 - [x] - Loops
 - [x] - Arrays
 - [x] - Pointers
-- [ ] - Includes
+- [ ] - Includes and constants
 - [ ] - Begin standard library
+- [ ] - Build tool
 
 ## Dependencies
 

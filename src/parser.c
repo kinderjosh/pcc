@@ -203,6 +203,12 @@ AST **prs_body(Prs *prs, size_t *cnt, bool allow_no_braces) {
 
                 prs_eat(prs, TOK_SEMI);
                 break;
+            case AST_DEREF:
+                if (stmt->deref.value == NULL)
+                    goto prs_body_invalid_stmt;
+
+                prs_eat(prs, TOK_SEMI);
+                break;
             default:
 prs_body_invalid_stmt:
                 fprintf(stderr, "%s:%zu:%zu: error: invalid statement '%s' in function '%s'\n", prs->file, stmt->ln, stmt->col, ast_types[stmt->type], prs->cur_func);
@@ -384,6 +390,30 @@ AST *prs_value(Prs *prs, char *type) {
                 exit(EXIT_FAILURE);
             }
             break;
+        case AST_DEREF: {
+            if (type == NULL) {
+                fprintf(stderr, "%s:%zu:%zu: error: invalid value '%s'\n", prs->file, value->ln, value->col, ast_types[value->type]);
+                exit(EXIT_FAILURE);
+            }
+
+            AST *sym = sym_find(AST_ASSIGN, value->scope_def, value->var.name);
+            char *base_type = strdup(sym->assign.type);
+            base_type[strlen(base_type) - 1] = '\0';
+
+            if ((strchr(type, '*') == NULL && strchr(base_type, '*') != NULL) || (strchr(type, '*') != NULL && strchr(base_type, '*') == NULL)) {
+                fprintf(stderr, "%s:%zu:%zu: error: invalid value from derefence of variable '%s' from type '%s' to '%s'\n", prs->file, value->ln, value->col, value->var.name, sym->assign.type, base_type);
+                exit(EXIT_FAILURE);
+            }
+
+            free(base_type);
+            break;
+        }
+        case AST_REF:
+            if (type == NULL || strchr(type, '*') == NULL) {
+                fprintf(stderr, "%s:%zu:%zu: error: invalid value '%s'\n", prs->file, value->ln, value->col, ast_types[value->type]);
+                exit(EXIT_FAILURE);
+            }
+            break;
         default:
             fprintf(stderr, "%s:%zu:%zu: error: invalid value '%s'\n", prs->file, value->ln, value->col, ast_types[value->type]);
             exit(EXIT_FAILURE);
@@ -497,17 +527,37 @@ prs_id_assign_value:
 
         char *check_type = type != NULL ? type : sym->assign.type;
         size_t check_cap = type != NULL ? cap : sym->assign.arr_cap;
+        bool check_mut = type != NULL ? mut : sym->assign.mut;
 
-        if (strchr(check_type, '*') != NULL && check_cap > 0) {
-            if (value->type != AST_STR && value->type != AST_ARR_LST) {
-                fprintf(stderr, "%s:%zu:%zu: error: invalid value '%s' for array of type '%s'\n", prs->file, ln, col, ast_types[value->type], type);
-                exit(EXIT_FAILURE);
-            } else if (value->type == AST_STR && strlen(value->data.str) + 1 >= check_cap) {
-                fprintf(stderr, "%s:%zu:%zu: error: value '%s' exceeds array capacity of size %zu\n", prs->file, ln, col, ast_types[value->type], check_cap);
-                exit(EXIT_FAILURE);
-            } else if (value->type == AST_ARR_LST && value->arr_lst.items_cnt > check_cap) {
-                fprintf(stderr, "%s:%zu:%zu: error: value '%s' exceeds array capacity of size %zu\n", prs->file, ln, col, ast_types[value->type], check_cap);
-                exit(EXIT_FAILURE);
+        if (strchr(check_type, '*') != NULL) {
+            if (check_cap > 0) {
+                if (value->type != AST_STR && value->type != AST_ARR_LST) {
+                    fprintf(stderr, "%s:%zu:%zu: error: invalid value '%s' for array of type '%s'\n", prs->file, ln, col, ast_types[value->type], type);
+                    exit(EXIT_FAILURE);
+                } else if (value->type == AST_STR && strlen(value->data.str) + 1 >= check_cap) {
+                    fprintf(stderr, "%s:%zu:%zu: error: value '%s' exceeds array capacity of size %zu\n", prs->file, ln, col, ast_types[value->type], check_cap);
+                    exit(EXIT_FAILURE);
+                } else if (value->type == AST_ARR_LST && value->arr_lst.items_cnt > check_cap) {
+                    fprintf(stderr, "%s:%zu:%zu: error: value '%s' exceeds array capacity of size %zu\n", prs->file, ln, col, ast_types[value->type], check_cap);
+                    exit(EXIT_FAILURE);
+                }
+            } else if (value->type == AST_REF) {
+                AST *ref_sym = sym_find(AST_ASSIGN, value->scope_def, value->ref.name);
+
+                char *base_type = strdup(check_type);
+                base_type[strlen(base_type) - 1] = '\0';
+
+                if (strcmp(ref_sym->assign.type, base_type) != 0) {
+                    fprintf(stderr, "%s:%zu:%zu: error: incompatible pointer conversion; reference to variable '%s' is type '%s*' converting to '%s'\n", prs->file, ln, col, value->ref.name, ref_sym->assign.type, check_type);
+                    exit(EXIT_FAILURE);
+                } else if (check_mut && !ref_sym->assign.mut) {
+                    fprintf(stderr, "%s:%zu:%zu: error: conflicting kinds of immutability; converting immutable reference to variable '%s' to a mutable reference\n", prs->file, ln, col, value->ref.name);
+                    exit(EXIT_FAILURE);
+                }
+
+                free(base_type);
+
+                // TODO: do we need more checks here?
             }
         }
     } else if (prs->tok->type == TOK_LSQUARE) {
@@ -599,6 +649,13 @@ AST *prs_id_call(Prs *prs, char *name, size_t ln, size_t col) {
                 fprintf(stderr, "%s:%zu:%zu: error: conflicting kinds of mutability in argument %zu of call to function '%s'\n", prs->file, arg->ln, arg->col, args_cnt, name);
                 exit(EXIT_FAILURE);
             }
+        } else if (arg->type == AST_REF) {
+            AST *arg_sym = sym_find(AST_ASSIGN, arg->scope_def, arg->ref.name);
+
+            if (param->assign.mut && !arg_sym->assign.mut) {
+                fprintf(stderr, "%s:%zu:%zu: error: conflicting kinds of mutability in argument %zu of call to function '%s'\n", prs->file, arg->ln, arg->col, args_cnt, name);
+                exit(EXIT_FAILURE);
+            }
         }
 
         args = realloc(args, (args_cnt + 1) * sizeof(AST *));
@@ -685,10 +742,10 @@ AST *prs_id_if(Prs *prs, size_t ln, size_t col) {
     return ast;
 }
 
-AST *prs_id_quick_math(Prs *prs, char *name, size_t ln, size_t col) {
+AST *prs_id_quick_math(Prs *prs, char *name, size_t ln, size_t col, bool is_deref) {
     AST *sym = sym_find(AST_ASSIGN, prs->cur_scope, name);
     if (sym == NULL) {
-        fprintf(stderr, "%s:%zu:%zu: Error: Undefined variable '%s'\n", prs->file, ln, col, name);
+        fprintf(stderr, "%s:%zu:%zu: error: undefined variable '%s'\n", prs->file, ln, col, name);
         exit(EXIT_FAILURE);
     } else if (!sym->assign.mut) {
         fprintf(stderr, "%s:%zu:%zu: error: reassigning immutable variable '%s'\n", prs->file, ln, col, name);
@@ -696,8 +753,16 @@ AST *prs_id_quick_math(Prs *prs, char *name, size_t ln, size_t col) {
     }
 
     AST **expr = calloc(3, sizeof(AST *));
-    expr[0] = ast_init(AST_VAR, prs->cur_scope, prs->cur_func, ln, col);
-    expr[0]->var.name = strdup(name);
+
+    if (is_deref) {
+        expr[0] = ast_init(AST_DEREF, prs->cur_scope, prs->cur_func, ln, col);
+        expr[0]->deref.name = strdup(name);
+        expr[0]->deref.value = NULL;
+    } else {
+        expr[0] = ast_init(AST_VAR, prs->cur_scope, prs->cur_func, ln, col);
+        expr[0]->var.name = strdup(name);
+    }
+
     expr[1] = ast_init(AST_OPER, prs->cur_scope, prs->cur_func, ln, col);
 
     TokType type;
@@ -726,11 +791,20 @@ AST *prs_id_quick_math(Prs *prs, char *name, size_t ln, size_t col) {
     value->math.expr = expr;
     value->math.expr_cnt = 3;
 
-    AST *ast = ast_init(AST_ASSIGN, prs->cur_scope, prs->cur_func, ln, col);
-    ast->assign.name = name;
-    ast->assign.type = NULL;
-    ast->assign.rbp = NULL;
-    ast->assign.value = value;
+    AST *ast;
+
+    if (is_deref) {
+        ast = ast_init(AST_DEREF, prs->cur_scope, prs->cur_func, ln, col);
+        ast->deref.name = name;
+        ast->deref.value = value;
+    } else {
+        ast = ast_init(AST_ASSIGN, prs->cur_scope, prs->cur_func, ln, col);
+        ast->assign.name = name;
+        ast->assign.type = NULL;
+        ast->assign.rbp = NULL;
+        ast->assign.value = value;
+    }
+
     return ast;
 }
 
@@ -824,7 +898,7 @@ AST *prs_id_for(Prs *prs, size_t ln, size_t col) {
 AST *prs_id_subscr(Prs *prs, char *name, size_t ln, size_t col) {
     AST *sym = sym_find(AST_ASSIGN, prs->cur_scope, name);
     if (sym == NULL) {
-        fprintf(stderr, "%s:%zu:%zu: Error: Undefined variable '%s'\n", prs->file, ln, col, name);
+        fprintf(stderr, "%s:%zu:%zu: error: undefined variable '%s'\n", prs->file, ln, col, name);
         exit(EXIT_FAILURE);
     }
 
@@ -918,7 +992,7 @@ AST *prs_id(Prs *prs) {
     else if (prs->tok->type == TOK_LPAREN)
         return prs_id_call(prs, id, ln, col);
     else if (prs->tok->type == TOK_PLUS_EQ || prs->tok->type == TOK_MINUS_EQ || prs->tok->type == TOK_STAR_EQ || prs->tok->type == TOK_SLASH_EQ || prs->tok->type == TOK_PERCENT_EQ)
-        return prs_id_quick_math(prs, id, ln, col);
+        return prs_id_quick_math(prs, id, ln, col, false);
     else if (prs->tok->type == TOK_LSQUARE)
         return prs_id_subscr(prs, id, ln, col);
     else if (sym_find(AST_ASSIGN, prs->cur_scope, id) != NULL) {
@@ -974,6 +1048,69 @@ AST *prs_arr_lst(Prs *prs) {
     return ast;
 }
 
+AST *prs_deref(Prs *prs) {
+    size_t ln = prs->tok->ln;
+    size_t col = prs->tok->col;
+    prs_eat(prs, TOK_STAR);
+
+    char *name = strdup(prs->tok->value);
+    prs_eat(prs, TOK_ID);
+
+    AST *sym = sym_find(AST_ASSIGN, prs->cur_scope, name);
+    if (sym == NULL) {
+        fprintf(stderr, "%s:%zu:%zu: error: undefined variable '%s'\n", prs->file, ln, col, name);
+        exit(EXIT_FAILURE);
+    } else if (strchr(sym->assign.type, '*') == NULL) {
+        fprintf(stderr, "%s:%zu:%zu: error: dereferencing non pointer variable '%s' of type '%s\n", prs->file, ln, col, name, sym->assign.type);
+        exit(EXIT_FAILURE);
+    }
+
+    if (prs->tok->type == TOK_PLUS_EQ || prs->tok->type == TOK_MINUS_EQ || prs->tok->type == TOK_STAR_EQ || prs->tok->type == TOK_SLASH_EQ || prs->tok->type == TOK_PERCENT_EQ)
+        return prs_id_quick_math(prs, name, ln, col, true);
+
+    AST *ast = ast_init(AST_DEREF, prs->cur_scope, prs->cur_func, ln, col);
+    ast->deref.name = name;
+
+    AST *value = NULL;
+
+    if (prs->tok->type == TOK_EQUAL) {
+        if (!sym->assign.mut) {
+            fprintf(stderr, "%s:%zu:%zu: error: reassigning immutable variable '%s'\n", prs->file, ln, col, name);
+            exit(EXIT_FAILURE);
+        }
+
+        prs_eat(prs, TOK_EQUAL);
+
+        char *base_type = strdup(sym->assign.type);
+        base_type[strlen(base_type) - 1] = '\0';
+
+        value = prs_value(prs, base_type);
+        free(base_type);
+    }
+
+    ast->deref.value = value;
+    return ast;
+}
+
+AST *prs_amp(Prs *prs) {
+    size_t ln = prs->tok->ln;
+    size_t col = prs->tok->col;
+    prs_eat(prs, TOK_AMP);
+
+    char *name = strdup(prs->tok->value);
+    prs_eat(prs, TOK_ID);
+
+    AST *sym = sym_find(AST_ASSIGN, prs->cur_scope, name);
+    if (sym == NULL) {
+        fprintf(stderr, "%s:%zu:%zu: error: undefined variable '%s'\n", prs->file, ln, col, name);
+        exit(EXIT_FAILURE);
+    }
+
+    AST *ast = ast_init(AST_REF, prs->cur_scope, prs->cur_func, ln, col);
+    ast->ref.name = name;
+    return ast;
+}
+
 AST *prs_stmt(Prs *prs) {
     switch (prs->tok->type) {
         case TOK_ID: return prs_id(prs);
@@ -981,6 +1118,8 @@ AST *prs_stmt(Prs *prs) {
         case TOK_FLOAT:
         case TOK_STR: return prs_data(prs);
         case TOK_LBRACE: return prs_arr_lst(prs);
+        case TOK_STAR: return prs_deref(prs);
+        case TOK_AMP: return prs_amp(prs);
         default:
             fprintf(stderr, "%s:%zu:%zu: error: invalid statement '%s'\n", prs->file, prs->tok->ln, prs->tok->col, tok_types[prs->tok->type]);
             exit(EXIT_FAILURE);

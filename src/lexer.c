@@ -234,7 +234,7 @@ Tok *lex_next(Lex *lex) {
         case '&':
             if (lex_peek(lex, 1) == '&')
                 return lex_step_with(lex, TOK_AND, "&&");
-            break;
+            return lex_step_with(lex, TOK_AMP, "&");
         case '|':
             if (lex_peek(lex, 1) == '|')
                 return lex_step_with(lex, TOK_OR, "||");

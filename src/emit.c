@@ -483,6 +483,17 @@ char *emit_call_arg(AST *ast, char *param_type, char *loc, bool on_stack) {
             free(store);
             break;
         }
+        case AST_REF: {
+            AST *ref_sym = sym_find(AST_ASSIGN, ast->scope_def, ast->ref.name);
+            code = calloc(strlen(ref_sym->assign.rbp) + strlen(loc) + 128, sizeof(char));
+
+            if (on_stack)
+                sprintf(code, "    lea rax, %s\n"
+                              "    mov qword %s, rax\n", loc, ref_sym->assign.rbp);
+            else
+                sprintf(code, "    lea %s, %s\n", loc, ref_sym->assign.rbp);
+            break;
+        }
         default: assert(false);
     }
 
@@ -894,6 +905,13 @@ char *emit_assign(AST *ast) {
             break;
         }
         */
+        case AST_REF: {
+            AST *ref = sym_find(AST_ASSIGN, value->scope_def, value->ref.name);
+            code = calloc(strlen(ref->assign.rbp) + strlen(rbp) + 128, sizeof(char));
+            sprintf(code, "    lea rax, %s\n"
+                          "    mov qword %s, rax\n", ref->assign.rbp, rbp);
+            break;
+        }
         default: assert(false);
     }
 
@@ -996,6 +1014,45 @@ char *emit_ret(AST *ast) {
             }
             break;
         }
+        case AST_DEREF: {
+            AST *sym = sym_find(AST_ASSIGN, value->scope_def, value->deref.name);
+            char *base_type = strdup(sym->assign.type);
+            base_type[strlen(base_type) - 1] = '\0';
+
+            char rbp[64];
+            strcpy(rbp, sym->assign.rbp);
+            rbp[strlen(rbp) - 1] = '\0';
+
+            code = emit_ast(value);
+            char *temp = calloc(strlen(code) + strlen(rbp) + 128, sizeof(char));
+
+            if (strcmp(type, "float") == 0) {
+                if (strcmp(base_type, "char") == 0)
+                    sprintf(temp, "%s    movsx eax, byte %s+r10*1]\n"
+                                  "    cvtsi2ss xmm0, eax\n", code, rbp);
+                else if (strcmp(base_type, "int") == 0)
+                    sprintf(temp, "%s    cvtsi2ss xmm0, dword %s+r10*1]\n", code, rbp);
+                else
+                    sprintf(temp, "%s    movss xmm0, dword %s+r10*1]\n", code, rbp);
+            } else {
+                if (strcmp(base_type, "char") == 0)
+                    sprintf(temp, "%s    movsx eax, byte %s+r10*1]\n", code, rbp);
+                else if (strcmp(base_type, "int") == 0)
+                    sprintf(temp, "%s    mov eax, dword %s+r10*1]\n", code, rbp);
+                else
+                    sprintf(temp, "%s    cvttss2si eax, dword %s+r10*1]\n", code, rbp);
+            }
+
+            free(code);
+            code = temp;
+            break;
+        }
+        case AST_REF: {
+            AST *sym = sym_find(AST_ASSIGN, "<global>", value->ref.name);
+            code = calloc(strlen(sym->assign.rbp) + 64, sizeof(char));
+            sprintf(code, "    lea rax, %s\n", sym->assign.rbp);
+            break;
+        }
         default: assert(false);
     }
 
@@ -1057,6 +1114,31 @@ char *emit_math_expr(AST *left, AST *right, TokType type) {
             }
 
             code = calloc(1, sizeof(char));
+            break;
+        }
+        case AST_DEREF: {
+            code = emit_ast(left);
+            AST *sym = sym_find(AST_ASSIGN, left->scope_def, left->deref.name);
+            char *base_type = strdup(sym->assign.type);
+            base_type[strlen(base_type) - 1] = '\0';
+
+            char rbp[64];
+            sprintf(rbp, "%s", sym->assign.rbp);
+            rbp[strlen(rbp) - 1] = '\0';
+
+            char *temp = calloc(strlen(code) + strlen(rbp) + 64, sizeof(char));
+
+            if (strcmp(base_type, "char") == 0)
+                sprintf(temp, "%s    movsx eax, byte %s+r10*1]\n", code, rbp);
+            else if (strcmp(base_type, "int") == 0)
+                sprintf(temp, "%s    mov eax, dword %s+r10*4]\n", code, rbp);
+            else {
+                sprintf(temp, "%s    movss xmm0, dword %s+r10*4]\n", code, rbp);
+                is_float = true;
+            }
+
+            free(code);
+            code = temp;
             break;
         }
         default: assert(false);
@@ -1243,6 +1325,137 @@ char *emit_math_expr(AST *left, AST *right, TokType type) {
             strcat(temp, code);
             free(code);
             code = temp;
+            break;
+        }
+        case AST_DEREF: {
+            AST *sym = sym_find(AST_ASSIGN, right->scope_def, right->deref.name);
+            char *base_type = strdup(sym->assign.type);
+            base_type[strlen(base_type) - 1] = '\0';
+
+            char rbp[64];
+            sprintf(rbp, "%s", sym->assign.rbp);
+            rbp[strlen(rbp) - 1] = '\0';
+
+            char *temp;
+            rsp += 8;
+
+            if (strcmp(base_type, "char") == 0) {
+                if (is_float) {
+                    if (rsp + 8 > rsp_cap) {
+                        rsp_cap += 8;
+                        setup = emit_ast(right);
+                        rsp_cap -= 8;
+                        temp = calloc(strlen(setup) + strlen(rbp) + 256, sizeof(char));
+
+                        sprintf(temp, "    sub rsp, 8\n"
+                                      "    movss dword [rbp-%zu], xmm0\n"
+                                      "%s"
+                                      "    movsx eax, byte %s+r10*1]\n"
+                                      "    cvtsi2ss xmm1, eax\n"
+                                      "    movss xmm0, dword [rbp-%zu]\n"
+                                      "    add rsp, 8\n", rsp + 8, setup, rbp, rsp + 8);
+
+                    } else {
+                        setup = emit_ast(right);
+                        temp = calloc(strlen(setup) + strlen(rbp) + 128, sizeof(char));
+
+                        sprintf(temp, "    movss dword [rbp-%zu], xmm0\n"
+                                      "%s"
+                                      "    movsx eax, byte %s+r10*1]\n"
+                                      "    cvtsi2ss xmm1, eax\n"
+                                      "    movss xmm0, dword [rbp-%zu]\n", rsp + 8, setup, rbp, rsp + 8);
+                    }
+
+                    strcpy(right_value, "xmm1");
+                } else {
+                    setup = emit_ast(right);
+                    temp = calloc(strlen(setup) + strlen(rbp) + 256, sizeof(char));
+
+                    sprintf(temp, "    push rax\n"
+                                  "%s"
+                                  "    movsx ebx, byte %s+r10*1]\n"
+                                  "    pop rax\n", setup, rbp);
+
+                    strcpy(right_value, "ebx");
+                }
+            } else if (strcmp(base_type, "int") == 0) {
+                if (is_float) {
+                    if (rsp + 8 > rsp_cap) {
+                        rsp_cap += 8;
+                        setup = emit_ast(right);
+                        rsp_cap -= 8;
+                        temp = calloc(strlen(setup) + strlen(rbp) + 256, sizeof(char));
+
+                        sprintf(temp, "    sub rsp, 8\n"
+                                      "    movss dword [rbp-%zu], xmm0\n"
+                                      "%s"
+                                      "    cvtsi2ss xmm1, dword %s+r10*4]\n"
+                                      "    movss xmm0, dword [rbp-%zu]\n"
+                                      "    add rsp, 8\n", rsp + 8, setup, rbp, rsp + 8);
+
+                    } else {
+                        setup = emit_ast(right);
+                        temp = calloc(strlen(setup) + strlen(rbp) + 128, sizeof(char));
+
+                        sprintf(temp, "    movss dword [rbp-%zu], xmm0\n"
+                                      "%s"
+                                      "    cvtsi2ss xmm1, dword %s+r10*4]\n"
+                                      "    movss xmm0, dword [rbp-%zu]\n", rsp + 8, setup, rbp, rsp + 8);
+                    }
+
+                    strcpy(right_value, "xmm1");
+                } else {
+                    setup = emit_ast(right);
+                    temp = calloc(strlen(setup) + strlen(rbp) + 256, sizeof(char));
+
+                    sprintf(temp, "    push rax\n"
+                                  "%s"
+                                  "    pop rax\n", setup);
+
+                    sprintf(right_value, "dword %s+r10*4]", rbp);
+                }
+            } else {
+                if (is_float) {
+                    if (rsp + 8 > rsp_cap) {
+                        rsp_cap += 8;
+                        setup = emit_ast(right);
+                        rsp_cap -= 8;
+                        temp = calloc(strlen(setup) + strlen(rbp) + 256, sizeof(char));
+
+                        sprintf(temp, "    sub rsp, 8\n"
+                                      "    movss dword [rbp-%zu], xmm0\n"
+                                      "%s"
+                                      "    movss xmm0, dword [rbp-%zu]\n"
+                                      "    add rsp, 8\n", rsp + 8, setup, rsp + 8);
+
+                    } else {
+                        setup = emit_ast(right);
+                        temp = calloc(strlen(setup) + strlen(rbp) + 128, sizeof(char));
+
+                        sprintf(temp, "    movss dword [rbp-%zu], xmm0\n"
+                                      "%s"
+                                      "    movss xmm0, dword [rbp-%zu]\n", rsp + 8, setup, rsp + 8);
+                    }
+
+                    strcpy(right_value, "xmm1");
+                } else {
+                    setup = emit_ast(right);
+                    temp = calloc(strlen(setup) + strlen(rbp) + 256, sizeof(char));
+
+                    sprintf(temp, "    push rax\n"
+                                  "%s"
+                                  "    pop rax\n"
+                                  "    cvtsi2ss xmm0, eax\n", setup);
+                    is_float = true;
+
+                }
+
+                sprintf(right_value, "dword %s+r10*4]", rbp);
+            }
+
+            rsp -= 8;
+            free(setup);
+            setup = temp;
             break;
         }
         default: assert(false);
@@ -1886,6 +2099,23 @@ char *emit_subscr(AST *ast) {
     return code;
 }
 
+char *emit_deref_as_subscr(AST *ast) {
+    AST *subscr = ast_init(AST_SUBSCR, ast->scope_def, ast->func_def, ast->ln, ast->col);
+    subscr->subscr.name = ast->deref.name;
+    subscr->subscr.value = ast->deref.value;
+    subscr->subscr.index = ast_init(AST_INT, ast->scope_def, ast->func_def, ast->ln, ast->col);
+    subscr->subscr.index->data.digit = 0;
+
+    char *code = emit_ast(subscr);
+    free(subscr->scope_def);
+    free(subscr->func_def);
+    free(subscr->subscr.index->scope_def);
+    free(subscr->subscr.index->func_def);
+    free(subscr->subscr.index);
+    free(subscr);
+    return code;
+}
+
 char *emit_ast(AST *ast) {
     switch (ast->type) {
         case AST_ROOT: return emit_root(ast);
@@ -1898,6 +2128,7 @@ char *emit_ast(AST *ast) {
         case AST_WHILE: return emit_while(ast);
         case AST_FOR: return emit_for(ast);
         case AST_SUBSCR: return ast->subscr.value == NULL ? emit_subscr(ast) : emit_assign(ast);
+        case AST_DEREF: return emit_deref_as_subscr(ast);
         default:
             fprintf(stderr, "steelc: error: missing backend for '%s'\n", ast_types[ast->type]);
             exit(EXIT_FAILURE);

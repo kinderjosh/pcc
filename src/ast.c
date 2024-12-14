@@ -21,7 +21,9 @@ const char *ast_types[] = {
     [AST_FOR] = "for",
     [AST_STR] = "string",
     [AST_SUBSCR] = "subscript",
-    [AST_ARR_LST] = "array list"
+    [AST_ARR_LST] = "array list",
+    [AST_DEREF] = "dereference",
+    [AST_REF] = "reference"
 };
 
 AST *ast_init(ASTType type, char *scope_def, char *func_def, size_t ln, size_t col) {
@@ -140,6 +142,15 @@ void ast_fields_del(AST *ast) {
             for (size_t i = 0; i < ast->arr_lst.items_cnt; i++)
                 ast_del(ast->arr_lst.items[i]);
             free(ast->arr_lst.items);
+            break;
+        case AST_DEREF:
+            free(ast->deref.name);
+
+            if (ast->deref.value != NULL)
+                ast_del(ast->deref.value);
+            break;
+        case AST_REF:
+            free(ast->ref.name);
             break;
         default: break;
     }

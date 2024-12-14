@@ -36,6 +36,7 @@ typedef enum {
     TOK_LSQUARE,
     TOK_RSQUARE,
     TOK_STR,
+    TOK_AMP
 } TokType;
 
 typedef struct {
