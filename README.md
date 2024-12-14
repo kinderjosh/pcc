@@ -1,5 +1,5 @@
 [![build](https://github.com/kinderjosh/steelc/actions/workflows/build.yml/badge.svg)](https://github.com/kinderjosh/steelc/actions/workflows/build.yml) ![GitHub License](https://img.shields.io/github/license/kinderjosh/steelc)
- ![Static Badge](https://img.shields.io/badge/written_in-c-blue) ![Static Badge](https://img.shields.io/badge/i_hate-rust-red)
+ ![Static Badge](https://img.shields.io/badge/memory_leaks-0-blue) ![Static Badge](https://img.shields.io/badge/i_hate-rust-red)
 
 
 
