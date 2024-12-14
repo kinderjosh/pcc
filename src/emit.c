@@ -15,6 +15,8 @@ extern AST **sym_tab;
 extern size_t sym_cnt;
 extern Const **constants;
 extern size_t constants_cnt;
+extern Alias **aliases;
+extern size_t aliases_cnt;
 
 enum {
     RAX,
@@ -223,7 +225,13 @@ char *emit_root(AST *ast) {
         free(constants[i]);
     }
 
-    constants_cnt = 0;
+    for (size_t i = 0; i < aliases_cnt; i++) {
+        free(aliases[i]->name);
+        free(aliases[i]->value);
+        free(aliases[i]);
+    }
+
+    constants_cnt = aliases_cnt = 0;
 
     return code;
 }

@@ -17,9 +17,10 @@ AST **sym_tab;
 size_t sym_cnt = 0;
 char **included;
 size_t included_cnt = 0;
-
 Const **constants;
 size_t constants_cnt = 0;
+Alias **aliases;
+size_t aliases_cnt = 0;
 
 /* Too lazy to explain this
  * Example:
@@ -159,6 +160,22 @@ Const *get_constant(char *name) {
     for (size_t i = 0; i < constants_cnt; i++) {
         if (strcmp(constants[i]->name, name) == 0)
             return constants[i];
+    }
+    return NULL;
+}
+
+bool is_alias(char *id) {
+    for (size_t i = 0; i < aliases_cnt; i++) {
+        if (strcmp(aliases[i]->name, id) == 0)
+            return true;
+    }
+    return false;
+}
+
+Alias *get_alias(char *name) {
+    for (size_t i = 0; i < aliases_cnt; i++) {
+        if (strcmp(aliases[i]->name, name) == 0)
+            return aliases[i];
     }
     return NULL;
 }
@@ -998,6 +1015,10 @@ AST *prs_id(Prs *prs) {
         }
 
         return prs_data(prs);
+    } else if (is_alias(id)) {
+        Alias *alias = get_alias(id);
+        id = realloc(id, (strlen(alias->value) + 1) * sizeof(char));
+        strcpy(id, alias->value);
     }
 
     if (strcmp(id, "mut") == 0) {
@@ -1237,7 +1258,6 @@ void prs_preproc(Prs *prs) {
         included = realloc(included, (included_cnt + 1) * sizeof(char *));
         included[included_cnt++] = strdup(prs->tok->value);
         prs_eat(prs, TOK_STR);
-        return;
     } else if (strcmp(prs->tok->value, "define") == 0) {
         prs_eat(prs, TOK_ID);
 
@@ -1259,11 +1279,27 @@ void prs_preproc(Prs *prs) {
 
         constants = realloc(constants, (constants_cnt + 1) * sizeof(Const *));
         constants[constants_cnt++] = cons;
-        return;
-    }
+    } else if (strcmp(prs->tok->value, "alias") == 0) {
+        prs_eat(prs, TOK_ID);
 
-    fprintf(stderr, "%s:%zu:%zu: error: unknown preprocess '%s'\n", prs->file, ln, col, prs->tok->value);
-    exit(EXIT_FAILURE);
+        if (is_alias(prs->tok->value)) {
+            fprintf(stderr, "%s:%zu:%zu: error: redefinition of alias '%s'\n", prs->file, ln, col, prs->tok->value);
+            exit(EXIT_FAILURE);
+        }
+
+        Alias *alias = malloc(sizeof(Alias));
+        alias->name = strdup(prs->tok->value);
+        prs_eat(prs, TOK_ID);
+
+        alias->value = strdup(prs->tok->value);
+        prs_eat(prs, TOK_ID);
+
+        aliases = realloc(aliases, (aliases_cnt + 1) * sizeof(Alias *));
+        aliases[aliases_cnt++] = alias;
+    } else {
+        fprintf(stderr, "%s:%zu:%zu: error: unknown preprocess '%s'\n", prs->file, ln, col, prs->tok->value);
+        exit(EXIT_FAILURE);
+    }
 }
 
 AST *prs_expr(Prs *prs) {
@@ -1311,7 +1347,8 @@ AST *prs_file(char *file) {
     AST *stmt;
 
     sym_tab = calloc(1, sizeof(AST *));
-    included = calloc(1, sizeof(char *));
+    included = calloc(1, sizeof(Const *));
+    aliases = calloc(1, sizeof(Alias *));
 
     while (prs->tok->type != TOK_EOF) {
         stmt = prs_stmt(prs);

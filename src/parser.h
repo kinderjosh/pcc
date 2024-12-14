@@ -20,6 +20,11 @@ typedef struct {
     AST *value;
 } Const;
 
+typedef struct {
+    char *name;
+    char *value;
+} Alias;
+
 AST *sym_find(ASTType type, char *scope, char *name);
 AST *prs_stmt(Prs *prs);
 AST *prs_file(char *file);

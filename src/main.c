@@ -8,11 +8,13 @@
 #include <dirent.h>
 
 extern Const **constants;
+extern char **aliases;
 
 void test(char *file) {
     AST *root = prs_file(file);
     free(emit_ast(root));
     ast_del(root);
+    free(aliases);
 }
 
 int main(int argc, char **argv) {
@@ -94,6 +96,7 @@ int main(int argc, char **argv) {
     AST *root = prs_file(file);
     char *code = emit_ast(root);
     ast_del(root);
+    free(aliases);
     free(constants);
 
     char *outasm;
