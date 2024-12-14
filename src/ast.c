@@ -23,7 +23,8 @@ const char *ast_types[] = {
     [AST_SUBSCR] = "subscript",
     [AST_ARR_LST] = "array list",
     [AST_DEREF] = "dereference",
-    [AST_REF] = "reference"
+    [AST_REF] = "reference",
+    [AST_INC] = "include"
 };
 
 AST *ast_init(ASTType type, char *scope_def, char *func_def, size_t ln, size_t col) {
@@ -151,6 +152,9 @@ void ast_fields_del(AST *ast) {
             break;
         case AST_REF:
             free(ast->ref.name);
+            break;
+        case AST_INC:
+            free(ast->inc.name);
             break;
         default: break;
     }

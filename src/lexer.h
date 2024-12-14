@@ -14,6 +14,7 @@ typedef struct {
     size_t col;
 } Lex;
 
+char *read_file(char *file);
 Lex *lex_init(char *file);
 void lex_del(Lex *lex);
 Tok *lex_next(Lex *lex);

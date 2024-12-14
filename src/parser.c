@@ -15,6 +15,16 @@ extern const char *ast_types[];
 
 AST **sym_tab;
 size_t sym_cnt = 0;
+char **included;
+size_t included_cnt = 0;
+
+typedef struct {
+    char *name;
+    AST *value;
+} Const;
+
+Const **constants;
+size_t constants_cnt = 0;
 
 /* Too lazy to explain this
  * Example:
@@ -132,6 +142,30 @@ bool digit_is_float(long double digit) {
         return true;
 
     return false;
+}
+
+bool is_included(char *name) {
+    for (size_t i = 0; i < included_cnt; i++) {
+        if (strcmp(included[i], name) == 0)
+            return true;
+    }
+    return false;
+}
+
+bool is_constant(char *id) {
+    for (size_t i = 0; i < constants_cnt; i++) {
+        if (strcmp(constants[i]->name, id) == 0)
+            return true;
+    }
+    return false;
+}
+
+Const *get_constant(char *name) {
+    for (size_t i = 0; i < constants_cnt; i++) {
+        if (strcmp(constants[i]->name, name) == 0)
+            return constants[i];
+    }
+    return NULL;
 }
 
 Prs *prs_init(char *file) {
@@ -633,7 +667,7 @@ AST *prs_id_call(Prs *prs, char *name, size_t ln, size_t col) {
     prs_eat(prs, TOK_LPAREN);
 
     while (prs->tok->type != TOK_RPAREN && prs->tok->type != TOK_EOF) {
-        if (args_cnt == sym->func.params_cnt) {
+        if (args_cnt > sym->func.params_cnt) {
             fprintf(stderr, "%s:%zu:%zu: error: excessive arguments in call to function '%s'; expected %zu but found %zu\n", prs->file, ln, col, name, sym->func.params_cnt, args_cnt);
             exit(EXIT_FAILURE);
         } else if (args_cnt > 0)
@@ -940,15 +974,17 @@ AST *prs_id_subscr(Prs *prs, char *name, size_t ln, size_t col) {
     return ast;
 }
 
+AST *prs_data(Prs *prs);
+
 AST *prs_id(Prs *prs) {
     size_t ln = prs->tok->ln;
     size_t col = prs->tok->col;
     bool mut = false;
 
     char *id = strdup(prs->tok->value);
-    prs_eat(prs, TOK_ID);
 
     if (strcmp(id, "mut") == 0) {
+        prs_eat(prs, TOK_ID);
         id = realloc(id, (strlen(prs->tok->value) + 1) * sizeof(char));
         strcpy(id, prs->tok->value);
         prs_eat(prs, TOK_ID);
@@ -956,6 +992,8 @@ AST *prs_id(Prs *prs) {
     }
 
     if (is_type(id)) {
+        prs_eat(prs, TOK_ID);
+
         while (prs->tok->type == TOK_STAR) {
             id = realloc(id, (strlen(id) + 2) * sizeof(char));
             strcat(id, "*");
@@ -975,6 +1013,29 @@ AST *prs_id(Prs *prs) {
         fprintf(stderr, "%s:%zu:%zu: error: expected variable declaration following 'mut'\n", prs->file, ln, col);
         exit(EXIT_FAILURE);
     }
+
+    if (is_constant(id)) {
+        Const *cons = get_constant(id);
+        free(id);
+        
+        if (cons->value->type == AST_STR) {
+            prs->tok->value = realloc(prs->tok->value, (strlen(cons->value->data.str) + 1) * sizeof(char));
+            strcpy(prs->tok->value, cons->value->data.str);
+            prs->tok->type = TOK_STR;
+        } else if (cons->value->type == AST_INT) {
+            prs->tok->value = realloc(prs->tok->value, 64 * sizeof(char));
+            sprintf(prs->tok->value, "%d", (int)cons->value->data.digit);
+            prs->tok->type = TOK_INT;
+        } else {
+            prs->tok->value = realloc(prs->tok->value, 64 * sizeof(char));
+            sprintf(prs->tok->value, "%f", (float)cons->value->data.digit);
+            prs->tok->type = TOK_FLOAT;
+        }
+
+        return prs_data(prs);
+    }
+
+    prs_eat(prs, TOK_ID);
     
     if (strcmp(id, "return") == 0) {
         free(id);
@@ -1111,6 +1172,104 @@ AST *prs_amp(Prs *prs) {
     return ast;
 }
 
+void prs_preproc(Prs *prs) {
+    size_t ln = prs->tok->ln;
+    size_t col = prs->tok->col;
+    prs_eat(prs, TOK_HASH);
+
+    if (strcmp(prs->tok->value, "include") == 0) {
+        prs_eat(prs, TOK_ID);
+
+        if (prs->tok->type != TOK_STR) {
+            fprintf(stderr, "%s:%zu:%zu: error: expected filename string to include but found '%s'\n", prs->file, prs->tok->ln, prs->tok->col, tok_types[prs->tok->type]);
+            exit(EXIT_FAILURE);
+        }
+
+        if (is_included(prs->tok->value)) {
+            prs_eat(prs, TOK_STR);
+            return;
+        }
+
+        FILE *check = fopen(prs->tok->value, "r");
+        char *path = strdup(prs->tok->value);
+
+        if (check == NULL && strchr(prs->file, '/') != NULL) {
+            char *cpy = strdup(prs->file);
+            strcpy(path, "\0");
+            char *tok = strtok(cpy, "/");
+
+            while (tok != NULL && strstr(tok, ".sc") == NULL) {
+                path = realloc(path, (strlen(path) + strlen(tok) + 2) * sizeof(char));
+                strcat(path, tok);
+                strcat(path, "/");
+                tok = strtok(NULL, "/");
+            }
+
+            free(cpy);
+            path = realloc(path, (strlen(path) + strlen(prs->tok->value) + 1) * sizeof(char));
+            strcat(path, prs->tok->value);
+        } else if (check != NULL)
+            fclose(check);
+
+        char *to_inc = read_file(path);
+        free(path);
+
+        Lex *lex = prs->lex;
+        char *new = calloc(lex->pos + strlen(to_inc) + 2, sizeof(char));
+        
+        size_t i = 0;
+        for (i = 0; i < lex->pos + 1; i++)
+            new[i] = lex->src[i];
+
+        char *other = calloc(lex->src_len - lex->pos + 1, sizeof(char));
+        size_t j = 0;
+
+        for (i = i; i < lex->src_len; i++)
+            other[j++] = lex->src[i];
+        
+        strcat(new, to_inc);
+        free(to_inc);
+
+        new = realloc(new, (strlen(new) + strlen(other) + 1) * sizeof(char));
+        strcat(new, other);
+        free(other);
+
+        free(lex->src);
+        lex->src = new;
+        lex->src_len = strlen(new);
+
+        included = realloc(included, (included_cnt + 1) * sizeof(char *));
+        included[included_cnt++] = strdup(prs->tok->value);
+        prs_eat(prs, TOK_STR);
+        return;
+    } else if (strcmp(prs->tok->value, "define") == 0) {
+        prs_eat(prs, TOK_ID);
+
+        if (is_constant(prs->tok->value)) {
+            fprintf(stderr, "%s:%zu:%zu: error: redefinition of constant '%s'\n", prs->file, ln, col, prs->tok->value);
+            exit(EXIT_FAILURE);
+        }
+
+        Const *cons = malloc(sizeof(Const));
+        cons->name = strdup(prs->tok->value);
+        prs_eat(prs, TOK_ID);
+
+        if (prs->tok->type != TOK_INT && prs->tok->type != TOK_FLOAT && prs->tok->type != TOK_STR) {
+            fprintf(stderr, "%s:%zu:%zu: error: invalid constant value '%s'\n", prs->file, prs->tok->ln, prs->tok->col, tok_types[prs->tok->type]);
+            exit(EXIT_FAILURE);
+        }
+
+        cons->value = prs_data(prs);
+
+        constants = realloc(constants, (constants_cnt + 1) * sizeof(char *));
+        constants[constants_cnt++] = cons;
+        return;
+    }
+
+    fprintf(stderr, "%s:%zu:%zu: error: unknown preprocess '%s'\n", prs->file, ln, col, prs->tok->value);
+    exit(EXIT_FAILURE);
+}
+
 AST *prs_stmt(Prs *prs) {
     switch (prs->tok->type) {
         case TOK_ID: return prs_id(prs);
@@ -1120,6 +1279,9 @@ AST *prs_stmt(Prs *prs) {
         case TOK_LBRACE: return prs_arr_lst(prs);
         case TOK_STAR: return prs_deref(prs);
         case TOK_AMP: return prs_amp(prs);
+        case TOK_HASH:
+            prs_preproc(prs);
+            return prs_stmt(prs);
         default:
             fprintf(stderr, "%s:%zu:%zu: error: invalid statement '%s'\n", prs->file, prs->tok->ln, prs->tok->col, tok_types[prs->tok->type]);
             exit(EXIT_FAILURE);
@@ -1133,6 +1295,7 @@ AST *prs_file(char *file) {
     AST *stmt;
 
     sym_tab = calloc(1, sizeof(AST *));
+    included = calloc(1, sizeof(char *));
 
     while (prs->tok->type != TOK_EOF) {
         stmt = prs_stmt(prs);
@@ -1158,6 +1321,18 @@ AST *prs_file(char *file) {
     }
 
     prs_del(prs);
+
+    for (size_t i = 0; i < included_cnt; i++)
+        free(included[i]);
+    free(included);
+
+    for (size_t i = 0; i < constants_cnt; i++) {
+        ast_del(constants[i]->value);
+        free(constants[i]->name);
+        free(constants[i]);
+    }
+
+    free(constants);
 
     AST *root = ast_init(AST_ROOT, "<internal>", "<internal>", 0, 0);
     root->root.asts = asts;

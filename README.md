@@ -21,7 +21,7 @@ Steel C is an immutable, strongly-typed language that aims to be safer and more 
 - [x] - Loops
 - [x] - Arrays
 - [x] - Pointers
-- [ ] - Preprocessing
+- [x] - Preprocessing
 - [ ] - Begin standard library
 - [ ] - Begin documentation
 - [ ] - Build tool

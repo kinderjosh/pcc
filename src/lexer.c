@@ -6,7 +6,9 @@
 #include <stdbool.h>
 #include <ctype.h>
 
-Lex *lex_init(char *file) {
+extern char *tok_types[];
+
+char *read_file(char *file) {
     FILE *f = fopen(file, "r");
     if (f == NULL) {
         fprintf(stderr, "%s: error: no such file exists\n", file);
@@ -24,12 +26,15 @@ Lex *lex_init(char *file) {
 
     src[len] = '\0';
     fclose(f);
+    return src;
+}
 
+Lex *lex_init(char *file) {
     Lex *lex = malloc(sizeof(Lex));
     lex->file = file;
-    lex->src = src;
-    lex->src_len = len;
-    lex->ch = src[0];
+    lex->src = read_file(file);
+    lex->src_len = strlen(lex->src);
+    lex->ch = lex->src[0];
     lex->pos = 0;
     lex->ln = lex->col = 1;
     return lex;
@@ -241,6 +246,7 @@ Tok *lex_next(Lex *lex) {
             break;
         case '[': return lex_step_with(lex, TOK_LSQUARE, "[");
         case ']': return lex_step_with(lex, TOK_RSQUARE, "]");
+        case '#': return lex_step_with(lex, TOK_HASH, "#");
         case '\0': return tok_init(TOK_EOF, strdup("<eof>"), lex->ln, lex->col);
         default: break;
     }

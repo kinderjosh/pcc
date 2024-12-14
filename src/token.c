@@ -35,7 +35,8 @@ const char *tok_types[] = {
     [TOK_LSQUARE] = "left square",
     [TOK_RSQUARE] = "right square",
     [TOK_STR] = "string",
-    [TOK_AMP] = "ampersand"
+    [TOK_AMP] = "ampersand",
+    [TOK_HASH] = "hash"
 };
 
 Tok *tok_init(TokType type, char *value, size_t ln, size_t col) {
