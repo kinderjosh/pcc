@@ -1143,6 +1143,11 @@ char *emit_math_expr(AST *left, AST *right, TokType type) {
             code = temp;
             break;
         }
+        case AST_EXPR: return emit_math_expr(left->expr.value, right, type);
+        case AST_MATH:
+            code = emit_math(left);
+            is_float = float_math_result;
+            break;
         default: assert(false);
     }
 
@@ -1448,6 +1453,7 @@ char *emit_math_expr(AST *left, AST *right, TokType type) {
                                   "%s"
                                   "    pop rax\n"
                                   "    cvtsi2ss xmm0, eax\n", setup);
+                    strcpy(left_value, "xmm0");
                     is_float = true;
 
                 }
@@ -1461,6 +1467,80 @@ char *emit_math_expr(AST *left, AST *right, TokType type) {
             setup = temp;
             break;
         }
+        case AST_EXPR:
+            free(code);
+            return emit_math_expr(left, right->expr.value, type);
+        case AST_MATH:
+            char *temp;
+            rsp += 8;
+
+            if (is_float) {
+                if (rsp + 8 > rsp_cap) {
+                    rsp_cap += 8;
+                    setup = emit_ast(right);
+                    rsp_cap -= 8;
+                    temp = calloc(strlen(setup) + 256, sizeof(char));
+
+                    if (float_math_result)
+                        sprintf(temp, "    sub rsp, 8\n"
+                                      "    movss dword [rbp-%zu], xmm0\n"
+                                      "%s"
+                                      "    movss xmm1, xmm0\n"
+                                      "    movss xmm0, dword [rbp-%zu]\n"
+                                      "    add rsp, 8\n", rsp + 8, setup, rsp + 8);
+                    else
+                        sprintf(temp, "    sub rsp, 8\n"
+                                      "    movss dword [rbp-%zu], xmm0\n"
+                                      "%s"
+                                      "    cvtsi2ss xmm1, eax\n"
+                                      "    movss xmm0, dword [rbp-%zu]\n"
+                                      "    add rsp, 8\n", rsp + 8, setup, rsp + 8);
+                } else {
+                    setup = emit_ast(right);
+                    temp = calloc(strlen(setup) + 256, sizeof(char));
+
+                    if (float_math_result)
+                        sprintf(temp, "    movss dword [rbp-%zu], xmm0\n"
+                                      "%s"
+                                      "    movss xmm1, xmm0\n"
+                                      "    movss xmm0, dword [rbp-%zu]\n", rsp + 8, setup, rsp + 8);
+                    else
+                        sprintf(temp, "    movss dword [rbp-%zu], xmm0\n"
+                                      "%s"
+                                      "    cvtsi2ss xmm1, eax\n"
+                                      "    movss xmm0, dword [rbp-%zu]\n", rsp + 8, setup, rsp + 8);
+                }
+
+                strcpy(right_value, "xmm1");
+            } else {
+                rsp_cap += 8;
+                setup = emit_ast(right);
+                rsp_cap -= 8;
+                temp = calloc(strlen(setup) + 256, sizeof(char));
+
+                if (float_math_result) {
+                    sprintf(temp, "    push rax\n"
+                                  "%s"
+                                  "    movss xmm1, xmm0\n"
+                                  "    pop rax\n"
+                                  "    cvtsi2ss xmm0, eax\n", setup);
+
+                    strcpy(left_value, "xmm0");
+                    strcpy(right_value, "xmm1");
+                    is_float = true;
+                } else {
+                    sprintf(temp, "    push rax\n"
+                                  "%s"
+                                  "    mov ebx, eax\n"
+                                  "    pop rax\n", setup);
+                    strcpy(right_value, "ebx");
+                }
+            }
+
+            rsp -= 8;
+            free(setup);
+            setup = temp;
+            break;
         default: assert(false);
     }
 

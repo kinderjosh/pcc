@@ -448,6 +448,7 @@ AST *prs_value(Prs *prs, char *type) {
                 exit(EXIT_FAILURE);
             }
             break;
+        case AST_EXPR: break;
         default:
             fprintf(stderr, "%s:%zu:%zu: error: invalid value '%s'\n", prs->file, value->ln, value->col, ast_types[value->type]);
             exit(EXIT_FAILURE);
@@ -1270,6 +1271,25 @@ void prs_preproc(Prs *prs) {
     exit(EXIT_FAILURE);
 }
 
+AST *prs_expr(Prs *prs) {
+    AST *ast = ast_init(AST_EXPR, prs->cur_scope, prs->cur_func, prs->tok->ln, prs->tok->col);
+    prs_eat(prs, TOK_LPAREN);
+
+    bool was_in_math = false;
+    if (prs->in_math) {
+        was_in_math = true;
+        prs->in_math = false;
+    }
+
+    ast->expr.value = prs_value(prs, NULL);
+    prs_eat(prs, TOK_RPAREN);
+
+    if (was_in_math)
+        prs->in_math = true;
+
+    return ast;
+}
+
 AST *prs_stmt(Prs *prs) {
     switch (prs->tok->type) {
         case TOK_ID: return prs_id(prs);
@@ -1282,6 +1302,7 @@ AST *prs_stmt(Prs *prs) {
         case TOK_HASH:
             prs_preproc(prs);
             return prs_stmt(prs);
+        case TOK_LPAREN: return prs_expr(prs);
         default:
             fprintf(stderr, "%s:%zu:%zu: error: invalid statement '%s'\n", prs->file, prs->tok->ln, prs->tok->col, tok_types[prs->tok->type]);
             exit(EXIT_FAILURE);

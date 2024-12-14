@@ -25,7 +25,8 @@ typedef enum {
     AST_ARR_LST,
     AST_DEREF,
     AST_REF,
-    AST_INC
+    AST_INC,
+    AST_EXPR
 } ASTType;
 
 typedef struct AST AST;
@@ -146,6 +147,10 @@ typedef struct AST {
         struct {
             char *name;
         } inc;
+
+        struct {
+            AST *value;
+        } expr;
     };
 } AST;
 

@@ -24,7 +24,8 @@ const char *ast_types[] = {
     [AST_ARR_LST] = "array list",
     [AST_DEREF] = "dereference",
     [AST_REF] = "reference",
-    [AST_INC] = "include"
+    [AST_INC] = "include",
+    [AST_EXPR] = "expression"
 };
 
 AST *ast_init(ASTType type, char *scope_def, char *func_def, size_t ln, size_t col) {
@@ -155,6 +156,9 @@ void ast_fields_del(AST *ast) {
             break;
         case AST_INC:
             free(ast->inc.name);
+            break;
+        case AST_EXPR:
+            ast_del(ast->expr.value);
             break;
         default: break;
     }
