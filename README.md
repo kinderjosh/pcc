@@ -20,7 +20,7 @@ This is NOT a replacement for C, because nothing will replace C. This is just a 
 - [x] - Loops
 - [x] - Arrays
 - [x] - Pointers
-- [ ] - Includes and constants
+- [ ] - Preprocessing
 - [ ] - Begin standard library
 - [ ] - Build tool
 
