@@ -22,6 +22,7 @@ This is NOT a replacement for C, because nothing will replace C. This is just a 
 - [x] - Pointers
 - [ ] - Preprocessing
 - [ ] - Begin standard library
+- [ ] - Begin documentation
 - [ ] - Build tool
 
 ## Dependencies
