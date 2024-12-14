@@ -1696,6 +1696,31 @@ char *emit_cond(AST **expr, size_t expr_cnt, char *true_label, char *false_label
                 is_float = float_math_result;
                 break;
             }
+            case AST_DEREF: {
+                setup = emit_ast(left);
+                AST *sym = sym_find(AST_ASSIGN, left->scope_def, left->deref.name);
+                char *base_type = strdup(sym->assign.type);
+                base_type[strlen(base_type) - 1] = '\0';
+
+                char rbp[64];
+                sprintf(rbp, "%s", sym->assign.rbp);
+                rbp[strlen(rbp) - 1] = '\0';
+
+                char *temp = calloc(strlen(setup) + strlen(rbp) + 64, sizeof(char));
+
+                if (strcmp(base_type, "char") == 0)
+                    sprintf(temp, "%s    movsx eax, byte %s+r10*1]\n", setup, rbp);
+                else if (strcmp(base_type, "int") == 0)
+                    sprintf(temp, "%s    mov eax, dword %s+r10*4]\n", setup, rbp);
+                else {
+                    sprintf(temp, "%s    movss xmm0, dword %s+r10*4]\n", setup, rbp);
+                    is_float = true;
+                }
+
+                free(setup);
+                setup = temp;
+                break;
+            }
             default: assert(false);
         }
 
@@ -1851,6 +1876,137 @@ char *emit_cond(AST **expr, size_t expr_cnt, char *true_label, char *false_label
                 rsp -= 8;
                 free(setup);
                 setup = save;
+                break;
+            }
+            case AST_DEREF: {
+                AST *sym = sym_find(AST_ASSIGN, right->scope_def, right->deref.name);
+                char *base_type = strdup(sym->assign.type);
+                base_type[strlen(base_type) - 1] = '\0';
+
+                char rbp[64];
+                sprintf(rbp, "%s", sym->assign.rbp);
+                rbp[strlen(rbp) - 1] = '\0';
+
+                char *temp;
+                rsp += 8;
+
+                if (strcmp(base_type, "char") == 0) {
+                    if (is_float) {
+                        if (rsp + 8 > rsp_cap) {
+                            rsp_cap += 8;
+                            setup = emit_ast(right);
+                            rsp_cap -= 8;
+                            temp = calloc(strlen(setup) + strlen(rbp) + 256, sizeof(char));
+
+                            sprintf(temp, "    sub rsp, 8\n"
+                                        "    movss dword [rbp-%zu], xmm0\n"
+                                        "%s"
+                                        "    movsx eax, byte %s+r10*1]\n"
+                                        "    cvtsi2ss xmm1, eax\n"
+                                        "    movss xmm0, dword [rbp-%zu]\n"
+                                        "    add rsp, 8\n", rsp + 8, setup, rbp, rsp + 8);
+
+                        } else {
+                            setup = emit_ast(right);
+                            temp = calloc(strlen(setup) + strlen(rbp) + 128, sizeof(char));
+
+                            sprintf(temp, "    movss dword [rbp-%zu], xmm0\n"
+                                        "%s"
+                                        "    movsx eax, byte %s+r10*1]\n"
+                                        "    cvtsi2ss xmm1, eax\n"
+                                        "    movss xmm0, dword [rbp-%zu]\n", rsp + 8, setup, rbp, rsp + 8);
+                        }
+
+                        strcpy(right_value, "xmm1");
+                    } else {
+                        setup = emit_ast(right);
+                        temp = calloc(strlen(setup) + strlen(rbp) + 256, sizeof(char));
+
+                        sprintf(temp, "    push rax\n"
+                                    "%s"
+                                    "    movsx ebx, byte %s+r10*1]\n"
+                                    "    pop rax\n", setup, rbp);
+
+                        strcpy(right_value, "ebx");
+                    }
+                } else if (strcmp(base_type, "int") == 0) {
+                    if (is_float) {
+                        if (rsp + 8 > rsp_cap) {
+                            rsp_cap += 8;
+                            setup = emit_ast(right);
+                            rsp_cap -= 8;
+                            temp = calloc(strlen(setup) + strlen(rbp) + 256, sizeof(char));
+
+                            sprintf(temp, "    sub rsp, 8\n"
+                                        "    movss dword [rbp-%zu], xmm0\n"
+                                        "%s"
+                                        "    cvtsi2ss xmm1, dword %s+r10*4]\n"
+                                        "    movss xmm0, dword [rbp-%zu]\n"
+                                        "    add rsp, 8\n", rsp + 8, setup, rbp, rsp + 8);
+
+                        } else {
+                            setup = emit_ast(right);
+                            temp = calloc(strlen(setup) + strlen(rbp) + 128, sizeof(char));
+
+                            sprintf(temp, "    movss dword [rbp-%zu], xmm0\n"
+                                        "%s"
+                                        "    cvtsi2ss xmm1, dword %s+r10*4]\n"
+                                        "    movss xmm0, dword [rbp-%zu]\n", rsp + 8, setup, rbp, rsp + 8);
+                        }
+
+                        strcpy(right_value, "xmm1");
+                    } else {
+                        setup = emit_ast(right);
+                        temp = calloc(strlen(setup) + strlen(rbp) + 256, sizeof(char));
+
+                        sprintf(temp, "    push rax\n"
+                                    "%s"
+                                    "    pop rax\n", setup);
+
+                        sprintf(right_value, "dword %s+r10*4]", rbp);
+                    }
+                } else {
+                    if (is_float) {
+                        if (rsp + 8 > rsp_cap) {
+                            rsp_cap += 8;
+                            setup = emit_ast(right);
+                            rsp_cap -= 8;
+                            temp = calloc(strlen(setup) + strlen(rbp) + 256, sizeof(char));
+
+                            sprintf(temp, "    sub rsp, 8\n"
+                                        "    movss dword [rbp-%zu], xmm0\n"
+                                        "%s"
+                                        "    movss xmm0, dword [rbp-%zu]\n"
+                                        "    add rsp, 8\n", rsp + 8, setup, rsp + 8);
+
+                        } else {
+                            setup = emit_ast(right);
+                            temp = calloc(strlen(setup) + strlen(rbp) + 128, sizeof(char));
+
+                            sprintf(temp, "    movss dword [rbp-%zu], xmm0\n"
+                                        "%s"
+                                        "    movss xmm0, dword [rbp-%zu]\n", rsp + 8, setup, rsp + 8);
+                        }
+
+                        strcpy(right_value, "xmm1");
+                    } else {
+                        setup = emit_ast(right);
+                        temp = calloc(strlen(setup) + strlen(rbp) + 256, sizeof(char));
+
+                        sprintf(temp, "    push rax\n"
+                                    "%s"
+                                    "    pop rax\n"
+                                    "    cvtsi2ss xmm0, eax\n", setup);
+                        is_float = true;
+
+                    }
+
+                    sprintf(right_value, "dword %s+r10*4]", rbp);
+                }
+
+                rsp -= 8;
+                free(setup);
+                setup = temp;
                 break;
             }
             default: assert(false);

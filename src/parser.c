@@ -1061,7 +1061,7 @@ AST *prs_deref(Prs *prs) {
         fprintf(stderr, "%s:%zu:%zu: error: undefined variable '%s'\n", prs->file, ln, col, name);
         exit(EXIT_FAILURE);
     } else if (strchr(sym->assign.type, '*') == NULL) {
-        fprintf(stderr, "%s:%zu:%zu: error: dereferencing non pointer variable '%s' of type '%s\n", prs->file, ln, col, name, sym->assign.type);
+        fprintf(stderr, "%s:%zu:%zu: error: dereferencing non pointer variable '%s' of type '%s'\n", prs->file, ln, col, name, sym->assign.type);
         exit(EXIT_FAILURE);
     }
 
